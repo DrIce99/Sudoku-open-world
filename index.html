@@ -315,7 +315,7 @@
             box-shadow: 0 0 0 3px rgba(34, 211, 238, .4);
         }
 
-        #lockBadge {
+                #lockBadge {
             position: fixed;
             top: 14px;
             left: 50%;
@@ -329,6 +329,46 @@
             padding: 6px 14px;
             border-radius: 999px;
             box-shadow: 0 6px 18px rgba(0, 0, 0, .3);
+        }
+
+        /* HUD COORDINATE */
+        #coordsHud {
+            position: fixed;
+            top: 14px;
+            left: 14px;
+            z-index: 20;
+            background: rgba(255, 255, 255, .85);
+            border-radius: 14px;
+            padding: 10px 16px;
+            box-shadow: 0 8px 24px rgba(30, 50, 90, .14);
+            backdrop-filter: blur(4px);
+            font-size: .8rem;
+            color: #0f172a;
+            font-weight: 700;
+            text-align: center;
+        }
+        #coordsHud .label {
+            font-size: .62rem;
+            color: #64748b;
+            letter-spacing: 1px;
+            display: block;
+            margin-bottom: 4px;
+        }
+        #coordsHud .vals {
+            display: flex;
+            gap: 14px;
+            justify-content: center;
+        }
+        #coordsHud .vals strong {
+            color: #1d4ed8;
+            font-size: .9rem;
+        }
+        #coordsHud .zone {
+            margin-top: 6px;
+            font-size: .65rem;
+            color: #334155;
+            border-top: 1px solid rgba(0,0,0,.1);
+            padding-top: 4px;
         }
 
         #toasts {
@@ -505,7 +545,7 @@
             font-size: .75rem;
         }
 
-        .confetti {
+                .confetti {
             position: fixed;
             top: -4vh;
             width: 9px;
@@ -513,6 +553,33 @@
             z-index: 80;
             pointer-events: none;
             border-radius: 2px;
+        }
+
+        /* RIFLESSO DIFFICOLTÀ ZONE */
+        .zone-refl {
+            position: absolute;
+            width: calc(var(--cell) * 3);
+            height: calc(var(--cell) * 3);
+            pointer-events: none;
+            z-index: -1;
+            border-radius: 4px;
+            mix-blend-mode: multiply;
+        }
+        .zone-refl.easy {
+            background: radial-gradient(circle, rgba(34, 197, 94, 0.18), transparent 75%);
+            animation: pulseRefl 5s ease-in-out infinite;
+        }
+        .zone-refl.mid {
+            background: radial-gradient(circle, rgba(249, 115, 22, 0.18), transparent 75%);
+            animation: pulseRefl 5s ease-in-out infinite 0.6s;
+        }
+        .zone-refl.hard {
+            background: radial-gradient(circle, rgba(239, 68, 68, 0.18), transparent 75%);
+            animation: pulseRefl 5s ease-in-out infinite 1.2s;
+        }
+        @keyframes pulseRefl {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.8; }
         }
 
         @media (max-width:820px) {
@@ -531,6 +598,16 @@
             <div id="activeBox"></div>
             <div id="player"></div>
         </div>
+    </div>
+
+    <!-- HUD COORDINATE -->
+    <div id="coordsHud">
+        <span class="label">POSIZIONE MONDO</span>
+        <div class="vals">
+            <span>X: <strong id="coordX">0</strong></span>
+            <span>Y: <strong id="coordY">0</strong></span>
+        </div>
+        <div class="zone" id="coordZ">Zona: 0, 0</div>
     </div>
 
     <aside id="tips">
@@ -814,7 +891,7 @@
             return el;
         }
         function removeNum(cx, cy) { const k = cx + "," + cy; const el = cellEls.get(k); if (el) { el.remove(); cellEls.delete(k); } }
-        function ensureWindow(zx, zy) {
+                function ensureWindow(zx, zy) {
             if (doneWindows.has(zKey(zx, zy))) return false;
 
             const present = [], missing = [];
@@ -828,14 +905,30 @@
 
             for (const m of missing) {
                 const ox = (zx + m.dx) * 3, oy = (zy + m.dy) * 3;
+                
+                // DETERMINA DIFFICOLTÀ ZONA BASATA SUL SEED
+                const zoneSeed = seed + (zx + m.dx) * 73856093 ^ (zy + m.dy) * 19349663;
+                const rng = mulberry32(zoneSeed);
+                const r = rng();
+                let diff = "easy";
+                if (r > 0.7) diff = "hard";
+                else if (r > 0.4) diff = "mid";
+                
+                // CREA IL RIFLESSO VISIVO DELLA ZONA
+                const reflEl = document.createElement("div");
+                reflEl.className = "zone-refl " + diff;
+                reflEl.style.left = ox * CELL + "px";
+                reflEl.style.top = oy * CELL + "px";
+                worldEl.appendChild(reflEl);
+
                 const v = new Uint8Array(9);
                 let rev = 0;
+                const p = REVEAL[diff]; // Usa la difficoltà specifica della zona
                 
                 for (let ly = 0; ly < 3; ly++) {
                     for (let lx = 0; lx < 3; lx++) {
                         const worldX = ox + lx;
                         const worldY = oy + ly;
-                        // Mappa le coordinate infinite sulla griglia 9x9 prefissata
                         const tileX = mod(worldX, 9);
                         const tileY = mod(worldY, 9);
                         const idx81 = tileY * 9 + tileX;
@@ -843,14 +936,17 @@
                         const val = globalSolution[idx81];
                         v[ly * 3 + lx] = val;
                         
-                        // Se è un numero immortale, lo rivela automaticamente
                         if (immortalMask[idx81]) {
+                            rev |= 1 << (ly * 3 + lx);
+                            createNum(worldX, worldY, val, "given");
+                        } else if (rng() < p) {
+                            // Rivela numeri extra in base alla difficoltà della zona
                             rev |= 1 << (ly * 3 + lx);
                             createNum(worldX, worldY, val, "given");
                         }
                     }
                 }
-                zones.set(zKey(zx + m.dx, zy + m.dy), { v, rev, wr: 0, h0: 9 - pc(rev), disc: false });
+                zones.set(zKey(zx + m.dx, zy + m.dy), { v, rev, wr: 0, h0: 9 - pc(rev), disc: false, diff: diff });
             }
             return true;
         }
@@ -908,10 +1004,20 @@
         }
 
         /* ========== GIOCATORE ========== */
+        function updateCoords() {
+            const elX = document.getElementById("coordX");
+            const elY = document.getElementById("coordY");
+            const elZ = document.getElementById("coordZ");
+            if (elX) elX.textContent = player.x;
+            if (elY) elY.textContent = player.y;
+            if (elZ) elZ.textContent = `Zona: ${Math.floor(player.x/3)}, ${Math.floor(player.y/3)}`;
+        }
+
         function placePlayer() {
             playerEl.style.left = player.x * CELL + "px";
             playerEl.style.top = player.y * CELL + "px";
             highlight();
+            updateCoords(); // Aggiorna l'HUD delle coordinate
         }
         function inLock(x, y) { return !lockRect || (x >= lockRect.x0 && x <= lockRect.x1 && y >= lockRect.y0 && y <= lockRect.y1); }
         function bump() { if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 }); }
@@ -1274,7 +1380,7 @@
 
             zones.clear(); cellEls.clear(); notesEls.clear(); notesMask.clear();
             doneUnits.clear(); doneWindows.clear();
-            worldEl.querySelectorAll(".num,.notesAbs").forEach(e => e.remove());
+            worldEl.querySelectorAll(".num,.notesAbs,.zone-refl").forEach(e => e.remove());
             level = 1; xp = 0; xpNeed = 100; maxHp = 100; hp = 100; notesMode = false;
             follow = true; lockRect = null; activeBox.classList.remove("locked");
             document.getElementById("lockBadge").style.display = "none";
