@@ -219,7 +219,7 @@
         #hud {
             position: fixed;
             left: 14px;
-            bottom: 74px;
+            bottom: 10px;
             z-index: 20;
             display: flex;
             flex-direction: column;
@@ -552,9 +552,11 @@
                 <div class="fill" id="xpFill"></div>
             </div>
         </div>
-        <div class="barRow"><span class="lbl">❤ VITA</span>
+        <div class="barRow"><span class="lbl">VITA</span>
             <div class="bar">
                 <div class="fill" id="hpFill"></div>
+                <span id="hpText"
+                    style="position: absolute; left: 61%; top: 30px; transform: translate(-50%, -50%); font-size: .68rem; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.5); pointer-events: none;"></span>
             </div>
         </div>
     </div>
@@ -562,7 +564,6 @@
     <div id="toasts"></div>
     <div id="vignette"></div>
     <div id="popup"></div>
-    <div id="pad"></div>
 
     <div id="loader">
         <svg class="ring" viewBox="0 0 60 60">
@@ -677,6 +678,19 @@
 
         /* ========== MONDO A ZONE (3x3 celle ciascuna) ========== */
         let CELL = 52;
+        
+        // SEED E IMMORTALI
+        let seed = Date.now();
+        let globalSolution = new Uint8Array(81);
+        let immortalMask = new Uint8Array(81);
+        function mulberry32(a) {
+            return function() {
+              var t = a += 0x6D2B79F5;
+              t = Math.imul(t ^ t >>> 15, t | 1);
+              t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+              return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            }
+        }
         const stage = document.getElementById("stage"),
             worldEl = document.getElementById("world"), gridBg = document.getElementById("gridBg"),
             playerEl = document.getElementById("player"), activeBox = document.getElementById("activeBox");
@@ -801,7 +815,6 @@
         }
         function removeNum(cx, cy) { const k = cx + "," + cy; const el = cellEls.get(k); if (el) { el.remove(); cellEls.delete(k); } }
         function ensureWindow(zx, zy) {
-            // MODIFICA: Blocca la generazione se la finestra è già stata completata
             if (doneWindows.has(zKey(zx, zy))) return false;
 
             const present = [], missing = [];
@@ -813,44 +826,27 @@
             }
             if (!missing.length) return false;
 
-            const fixed = new Uint8Array(81);
-            for (const p of present) {
-                const ox = (zx + p.dx) * 3, oy = (zy + p.dy) * 3;
-                for (let ly = 0; ly < 3; ly++) {
-                    for (let lx = 0; lx < 3; lx++) {
-                        fixed[(oy + ly - (zy - 1) * 3) * 9 + (ox + lx - (zx - 1) * 3)] = p.z.v[ly * 3 + lx];
-                    }
-                }
-            }
-
-            let sol = null;
-            // Aumentati i tentativi di risoluzione
-            for (let t = 0; t < 100 && !sol; t++) {
-                sol = solveWindow(fixed);
-            }
-
-            // Fallback di garanzia: se il solver fallisce per vincoli troppo rigidi, genera valori validi isolati
-            if (!sol) {
-                sol = new Uint8Array(81);
-                const numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-                for (let i = 0; i < 81; i++) {
-                    sol[i] = fixed[i] || numbers[R(9)];
-                }
-            }
-
-            const p = REVEAL[difficolta];
             for (const m of missing) {
                 const ox = (zx + m.dx) * 3, oy = (zy + m.dy) * 3;
                 const v = new Uint8Array(9);
                 let rev = 0;
+                
                 for (let ly = 0; ly < 3; ly++) {
                     for (let lx = 0; lx < 3; lx++) {
-                        const idx = (oy + ly - (zy - 1) * 3) * 9 + (ox + lx - (zx - 1) * 3);
-                        const val = sol[idx];
+                        const worldX = ox + lx;
+                        const worldY = oy + ly;
+                        // Mappa le coordinate infinite sulla griglia 9x9 prefissata
+                        const tileX = mod(worldX, 9);
+                        const tileY = mod(worldY, 9);
+                        const idx81 = tileY * 9 + tileX;
+                        
+                        const val = globalSolution[idx81];
                         v[ly * 3 + lx] = val;
-                        if (Math.random() < p) {
+                        
+                        // Se è un numero immortale, lo rivela automaticamente
+                        if (immortalMask[idx81]) {
                             rev |= 1 << (ly * 3 + lx);
-                            createNum(ox + lx, oy + ly, val, "given");
+                            createNum(worldX, worldY, val, "given");
                         }
                     }
                 }
@@ -871,39 +867,8 @@
             return g;
         }
         function fixWindow(zx, zy) {
-            // MODIFICA: Blocca aggiunte extra se la finestra è già completata
-            if (doneWindows.has(zKey(zx, zy))) return;
-
-            // Limite massimo di celle extra svelabili (evita di riempire la griglia)
-            const maxExtraGiven = 3;
-
-            for (let guard = 0; guard < maxExtraGiven; guard++) {
-                // Se la finestra ha già una soluzione unica, si ferma immediatamente
-                if (countSolutions(windowGivens(zx, zy), 2) === 1) return;
-
-                const hidden = [];
-                for (let dy = -1; dy <= 1; dy++) {
-                    for (let dx = -1; dx <= 1; dx++) {
-                        const z = getZone(zx + dx, zy + dy);
-                        if (!z) continue;
-                        const ox = (zx + dx) * 3, oy = (zy + dy) * 3;
-                        for (let li = 0; li < 9; li++) {
-                            const m = 1 << li;
-                            if (!(z.rev & m) && !(z.wr & m)) {
-                                hidden.push([ox + li % 3, oy + Math.floor(li / 3), z, li]);
-                            }
-                        }
-                    }
-                }
-
-                if (!hidden.length) return;
-
-                // Rivela una singola cella extra per aiutare la giocabilità
-                const [hx, hy, z, li] = hidden[R(hidden.length)];
-                z.rev |= 1 << li;
-                const el = createNum(hx, hy, z.v[li], "given");
-                if (AN) AN({ targets: el, scale: [.5, 1.15, 1], duration: 260, easing: "easeOutQuad" });
-            }
+            // DISABILITATO: I numeri sono prefissati (immortali), non generiamo aiuti extra
+            return;
         }
         function enterZone(zx, zy, dx = 0, dy = 0) {
             // MODIFICA: Previene generazione se il mondo è bloccato o la finestra è completata
@@ -1082,7 +1047,13 @@
                     if (!write) continue;               // completata solo da numeri rivelati: nessun premio
                     gainXp(20);
                     toast("+20 XP — " + (t === "row" ? "riga" : t === "col" ? "colonna" : "3×3") + " completata!", "gold");
-                    const els = cellsU.map(([cx, cy]) => cellEls.get(cx + "," + cy)).filter(Boolean);
+                    const els = []; for (let y = 0; y < 9; y++)for (let x = 0; x < 9; x++)els.push(cellEls.get((ox + x) + "," + (oy + y)));
+                    if (AN) AN({
+                        targets: els.filter(Boolean),
+                        keyframes: [{ scale: 1 }, { scale: 1.03, backgroundColor: "rgba(255,255,255,0.2)" }, { scale: 1 }],
+                        duration: 400, easing: "easeOutQuad", delay: AN.stagger(10)
+                    });
+                    confetti(40); showWin();
                     if (AN) AN({
                         targets: els, keyframes: [{ scale: 1 }, { scale: 1.22, textShadow: "0 0 18px rgba(250,204,21,.95)" }, { scale: 1, textShadow: "0 0 0 rgba(250,204,21,0)" }],
                         duration: 650, easing: "easeInOutQuad", delay: AN.stagger(30)
@@ -1132,6 +1103,8 @@
             hpFill.style.width = Math.max(0, hp / maxHp * 100) + "%";
             xpFill.style.width = Math.min(100, xp / xpNeed * 100) + "%";
             lvlEl.textContent = "LV " + level;
+            const hpText = document.getElementById("hpText");
+            if (hpText) hpText.textContent = Math.max(0, hp) + " / " + maxHp;
         }
         function gainXp(n) {
             xp += n;
@@ -1145,10 +1118,13 @@
             updateBars();
         }
         function levelUpFx() {
-            toast("LIVELLO " + level + "! Vita +5% e ripristinata", "gold");
-            const p = document.getElementById("popup"); p.textContent = "LIVELLO " + level + "!";
-            if (AN) AN({ targets: p, keyframes: [{ opacity: 0, scale: .4 }, { opacity: 1, scale: 1.15, duration: 350 }, { opacity: 0, scale: 1, duration: 600, delay: 500 }], easing: "easeOutBack" });
-            confetti(60);
+            toast("LIVELLO " + level + "!", "gold");
+            if (AN) AN({
+                targets: "#xpFill",
+                backgroundColor: ["#a3e635", "#22c55e"],
+                duration: 500,
+                easing: "easeOutQuad"
+            });
         }
         function wrongNumber() {
             hp -= Math.round(maxHp * 0.15);
@@ -1244,18 +1220,6 @@
         }, { passive: false });
 
         /* ========== INPUT ========== */
-        const pad = document.getElementById("pad"); let padNotes = null;
-        for (let d = 1; d <= 9; d++) {
-            const b = document.createElement("button");
-            b.textContent = d;
-            b.onclick = () => pressDigit(d);
-            b.onpointerenter = () => highlight(d);
-            b.onpointerleave = () => highlight();
-            pad.appendChild(b);
-        }
-        padNotes = document.createElement("button"); padNotes.className = "sp"; padNotes.textContent = "✎"; padNotes.onclick = toggleNotes; pad.appendChild(padNotes);
-        const padErase = document.createElement("button"); padErase.className = "sp"; padErase.textContent = "⌫"; padErase.onclick = eraseCur; pad.appendChild(padErase);
-
         document.addEventListener("keydown", e => {
             const k = e.key.toLowerCase();
             if (mapMode) {
@@ -1292,11 +1256,26 @@
             document.getElementById("phase").textContent = "Genero il mondo…";
             document.getElementById("bar").style.width = "30%";
             await frame();
+            
+            // PRE-GENERAZIONE SEED E IMMORTALI
+            seed = Date.now();
+            const baseFixed = new Uint8Array(81);
+            let solved = solveWindow(baseFixed); 
+            if (!solved) solved = solveWindow(baseFixed); // Fallback
+            globalSolution = solved || baseFixed;
+            
+            const immortalCount = 38; // Totale numeri prefissati su 81
+            const indices = [...Array(81).keys()];
+            shuffle(indices);
+            immortalMask = new Uint8Array(81);
+            for (let i = 0; i < immortalCount; i++) {
+                immortalMask[indices[i]] = 1;
+            }
+
             zones.clear(); cellEls.clear(); notesEls.clear(); notesMask.clear();
             doneUnits.clear(); doneWindows.clear();
             worldEl.querySelectorAll(".num,.notesAbs").forEach(e => e.remove());
             level = 1; xp = 0; xpNeed = 100; maxHp = 100; hp = 100; notesMode = false;
-            padNotes.classList.remove("on");
             follow = true; lockRect = null; activeBox.classList.remove("locked");
             document.getElementById("lockBadge").style.display = "none";
             enterZone(0, 0);
