@@ -801,6 +801,9 @@
         }
         function removeNum(cx, cy) { const k = cx + "," + cy; const el = cellEls.get(k); if (el) { el.remove(); cellEls.delete(k); } }
         function ensureWindow(zx, zy) {
+            // MODIFICA: Blocca la generazione se la finestra è già stata completata
+            if (doneWindows.has(zKey(zx, zy))) return false;
+
             const present = [], missing = [];
             for (let dy = -1; dy <= 1; dy++) {
                 for (let dx = -1; dx <= 1; dx++) {
@@ -868,6 +871,9 @@
             return g;
         }
         function fixWindow(zx, zy) {
+            // MODIFICA: Blocca aggiunte extra se la finestra è già completata
+            if (doneWindows.has(zKey(zx, zy))) return;
+
             // Limite massimo di celle extra svelabili (evita di riempire la griglia)
             const maxExtraGiven = 3;
 
@@ -900,6 +906,12 @@
             }
         }
         function enterZone(zx, zy, dx = 0, dy = 0) {
+            // MODIFICA: Previene generazione se il mondo è bloccato o la finestra è completata
+            if (!follow || doneWindows.has(zKey(zx, zy))) {
+                highlight();
+                return;
+            }
+
             // Se ci stiamo spostando in una direzione specifica, verifichiamo la parete di ingresso
             if (dx !== 0 || dy !== 0) {
                 const checkX = zx * 3 + (dx === 1 ? 0 : (dx === -1 ? 2 : 0));
@@ -964,11 +976,11 @@
                 lockRect = null; activeBox.classList.remove("locked");
                 document.getElementById("lockBadge").style.display = "none";
                 curZone = zOf(player.x, player.y);
-                enterZone(curZone.x, curZone.y);
+                // MODIFICA: Non chiamiamo enterZone qui per evitare che lo sblocco generi numeri extra dal nulla
                 recenter(true);
                 checkUnits();
+                highlight();
             }
-            highlight();
         }
 
         /* ========== NUMERI ========== */
