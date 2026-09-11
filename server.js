@@ -4,137 +4,422 @@ import fs from "fs";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
 
-// 1. Inizializza Firebase Admin SDK
+// Inizializza Firebase Admin SDK
 const serviceAccount = JSON.parse(fs.readFileSync('./serviceAccountKey.json', 'utf8'));
+
 initializeApp({
-    credential: cert(serviceAccount),
-    databaseURL: "https://infinite-doku-default-rtdb.europe-west1.firebasedatabase.app"
+  credential: cert(serviceAccount),
+  databaseURL: "https://infinite-doku-default-rtdb.europe-west1.firebasedatabase.app"
 });
-const database = getDatabase(); // Variabile corretta
+
+const database = getDatabase();
 
 const app = express();
-// Middleware per parsare i JSON inviati via sendBeacon
 app.use(express.json());
 
 const PORT = 8080;
 const server = app.listen(PORT, () => console.log(`Server Sudoku attivo su porta ${PORT}`));
+
 const wss = new WebSocketServer({ server });
 
-let worldState = { globalSolution: [], immortalMask: [], zones: {} };
+// ============================================================
+// NUOVO MONDO SAMURAI INFINITO
+// ============================================================
+// WORLD_VERSION = 2 serve a rigenerare il vecchio mondo se esiste già.
+// Se hai dati importanti su Firebase, fai prima un backup.
+const WORLD_VERSION = 2;
+
+
+// Se true, prova a conservare le scritture delle zone che restano giocabili.
+// Di solito, cambiando generazione, è più sicuro lasciarlo false.
+const PRESERVE_OLD_WRITES_ON_RESET = false;
+
+// Se true, il server blocca anche i movimenti verso zone vuote.
+// Richiede che msg.x e msg.y siano coordinate globali di cella.
+// Se il tuo client usa coordinate locali/view, lascialo false e blocca solo lato client.
+const SERVER_BLOCK_EMPTY_MOVEMENT = false;
+
+let worldState = {
+    version: WORLD_VERSION,
+    globalSolution: [],
+    immortalMask: [],
+    zones: {}
+};
+
+worldState.seed = 20260222;
+
 let players = {};
 
-// Helper di shuffling
-const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; };
+// Helper shuffle esistente
+const shuffle = a => {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+
+// Modulo positivo
+const mod = (n, m) => ((n % m) + m) % m;
+
+function parseZoneKey(zoneKey) {
+  const parts = String(zoneKey || "").split(",");
+  const zx = Number(parts[0]);
+  const zy = Number(parts[1]);
+
+  if (!Number.isFinite(zx) || !Number.isFinite(zy)) {
+    return { zx: 0, zy: 0 };
+  }
+
+  return { zx, zy };
+}
+
+// ============================================================
+// MASCHERA DEL MONDO
+// ============================================================
+/* ============================================================
+   PATTERN SAMURAI INFINITO (Sovrapposizione griglie 9x9)
+   ============================================================ */
+
+function isPlayableZone(zx, zy) {
+  // Cerca se il blocco (zx, zy) fa parte di almeno una griglia 9x9 (3x3 blocchi)
+  // Le origini delle griglie 9x9 si trovano sulle coordinate pari (2i, 2j) con (i + j) pari.
+  for (let gx = zx - 2; gx <= zx; gx++) {
+    if (mod(gx, 2) !== 0) continue;
+    
+    for (let gy = zy - 2; gy <= zy; gy++) {
+      if (mod(gy, 2) !== 0) continue;
+
+      // Un'origine (gx, gy) è valida se la somma delle sue coordinate di griglia è multiplo di 4
+      if (mod(gx + gy, 4) === 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function isPlayableCell(cx, cy) {
+  const zx = Math.floor(cx / 3);
+  const zy = Math.floor(cy / 3);
+  return isPlayableZone(zx, zy);
+}
+
+// ============================================================
+// SOLUZIONE INFINITA DETERMINISTICA
+// ============================================================
+// Questa formula genera una soluzione Sudoku valida per finestre 9x9
+// allineate a blocchi 3x3, usando coordinate globali.
+// Non è più necessario "risolvere" un blocco partendo dai vicini.
+function solutionAtCell(x, y) {
+  const r = mod(y, 9);
+  const c = mod(x, 9);
+  return ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
+}
+
+function zoneSolutionPayload(zx, zy) {
+  const solution = {};
+
+  for (let cy = 0; cy < 3; cy++) {
+    for (let cx = 0; cx < 3; cx++) {
+      const key = `${cx},${cy}`;
+      solution[key] = solutionAtCell(zx * 3 + cx, zy * 3 + cy);
+    }
+  }
+
+  return solution;
+}
+
+// Costruisce la finestra 9x9 iniziale centrata sulla zona (0,0).
+// La zona centrale (0,0) è giocabile.
+function buildInitialWorld(preservedZones = {}) {
+  const globalSolution = new Array(81).fill(0);
+  const immortalMask = new Array(81).fill(0);
+  const activeIndices = [];
+
+  // Finestra 9x9 attorno alla zona centrale (0,0).
+  // La zona centrale occupa le celle globali x = 0,1,2 e y = 0,1,2.
+  // La finestra parte quindi da x = -3, y = -3.
+  const startX = -3;
+  const startY = -3;
+
+  for (let vy = 0; vy < 9; vy++) {
+    for (let vx = 0; vx < 9; vx++) {
+      const x = startX + vx;
+      const y = startY + vy;
+
+      const zx = Math.floor(x / 3);
+      const zy = Math.floor(y / 3);
+
+      const i = vy * 9 + vx;
+
+      if (isPlayableZone(zx, zy)) {
+        globalSolution[i] = solutionAtCell(x, y);
+        activeIndices.push(i);
+      } else {
+        // Blocco vuoto / muro
+        globalSolution[i] = 0;
+      }
+    }
+  }
+
+  shuffle(activeIndices);
+
+  const immortalCount = Math.min(38, activeIndices.length);
+  for (let i = 0; i < immortalCount; i++) {
+    immortalMask[activeIndices[i]] = 1;
+  }
+
+  return {
+    version: WORLD_VERSION,
+    generator: "samurai-cross-v1",
+    globalSolution,
+    immortalMask,
+    zones: preservedZones
+  };
+}
 
 // Caricamento del mondo da Firebase
 database.ref("worldState").get().then((snapshot) => {
-    if (snapshot.exists()) {
-        worldState = snapshot.val();
-        if (!worldState.zones) worldState.zones = {};
-        if (worldState.globalSolution) worldState.globalSolution = Object.values(worldState.globalSolution);
-        if (worldState.immortalMask) worldState.immortalMask = Object.values(worldState.immortalMask);
-        console.log("Mondo caricato da Firebase.");
+  if (snapshot.exists()) {
+    const loaded = snapshot.val();
+
+    // Se il mondo è vecchio, rigeneriamo il nuovo mondo samurai.
+    if (Number(loaded.version) !== WORLD_VERSION) {
+      console.log("Vecchio mondo rilevato. Genero nuovo mondo samurai...");
+
+      let preserved = {};
+
+      if (PRESERVE_OLD_WRITES_ON_RESET && loaded.zones) {
+        for (const [zoneKey, zoneData] of Object.entries(loaded.zones)) {
+          const { zx, zy } = parseZoneKey(zoneKey);
+
+          if (isPlayableZone(zx, zy) && zoneData && zoneData.writes) {
+            preserved[zoneKey] = { writes: zoneData.writes };
+          }
+        }
+      }
+
+      worldState = buildInitialWorld(preserved);
+      database.ref("worldState").set(worldState);
+
+      console.log("Nuovo mondo samurai salvato su Firebase.");
     } else {
-        console.log("Generazione nuovo mondo su Firebase...");
-        const globalSolution = new Array(81);
-        const immortalMask = new Array(81).fill(0);
-        
-        for(let i=0; i<81; i++) globalSolution[i] = (i % 9) + 1;
-        
-        const indices = [...Array(81).keys()];
-        shuffle(indices);
-        for (let i = 0; i < 38; i++) immortalMask[indices[i]] = 1;
-        
-        worldState = { globalSolution, immortalMask, zones: {} };
-        database.ref("worldState").set(worldState);
-        console.log("Nuovo mondo salvato su Firebase.");
+      worldState = loaded;
+
+      if (!worldState.zones) worldState.zones = {};
+
+      if (worldState.globalSolution) {
+        worldState.globalSolution = Object.values(worldState.globalSolution);
+      }
+
+      if (worldState.immortalMask) {
+        worldState.immortalMask = Object.values(worldState.immortalMask);
+      }
+
+      console.log("Mondo caricato da Firebase.");
     }
+  } else {
+    console.log("Generazione nuovo mondo su Firebase...");
+
+    worldState = buildInitialWorld();
+    database.ref("worldState").set(worldState);
+
+    console.log("Nuovo mondo samurai salvato su Firebase.");
+  }
 });
 
 // Manda a tutti la lista aggiornata dei player online
 function broadcastPlayers() {
-    const playersData = Object.values(players).map(p => ({ 
-        id: p.id, x: p.x, y: p.y, name: p.name, color: p.color 
-    }));
-    wss.clients.forEach(client => {
-        if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: "players", data: playersData }));
-        }
-    });
+  const playersData = Object.values(players).map(p => ({
+    id: p.id,
+    x: p.x,
+    y: p.y,
+    name: p.name,
+    color: p.color
+  }));
+
+  wss.clients.forEach(client => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify({ type: "players", data: playersData }));
+    }
+  });
 }
 
 wss.on("connection", (ws) => {
-    let myId = Math.random().toString(36).substr(2, 9);
-    players[myId] = { id: myId, x: 4, y: 4, name: "Guest", color: "#38bdf8", ws };
+  let myId = Math.random().toString(36).substr(2, 9);
 
-    // Invia stato iniziale a chi si connette
-    ws.send(JSON.stringify({ type: "init", world: worldState, myId }));
+  players[myId] = {
+    id: myId,
+    x: 4,
+    y: 4,
+    name: "Guest",
+    color: "#38bdf8",
+    ws
+  };
 
-    ws.on("message", (message) => {
-        const msg = JSON.parse(message);
-        
-        if (msg.type === "join") {
-            players[myId].name = msg.name;
-            players[myId].color = msg.color || "#38bdf8";
-            broadcastPlayers();
-        } 
-        
-        else if (msg.type === "move") {
-            // Aggiorna posizione in tempo reale
-            players[myId].x = msg.x;
-            players[myId].y = msg.y;
-            broadcastPlayers();
-        } 
-        
-        else if (msg.type === "fetch_zone") {
-            // Quando un player entra in una zona, gli inviamo i numeri scritti dagli altri in quella zona
-            const zoneKey = msg.zoneKey;
-            const zoneData = worldState.zones[zoneKey];
-            if (zoneData && zoneData.writes) {
-                ws.send(JSON.stringify({ type: "zone_writes", zoneKey: zoneKey, writes: zoneData.writes }));
-            }
-        } 
-        
-        else if (msg.type === "write") {
-            const k = `${msg.cx},${msg.cy}`;
-            if (!worldState.zones[msg.zoneKey]) worldState.zones[msg.zoneKey] = { writes: {} };
-            
-            const writeData = { val: msg.val, color: msg.color };
-            worldState.zones[msg.zoneKey].writes[k] = writeData;
+  // Invia stato iniziale a chi si connette
+  ws.send(JSON.stringify({
+    type: "init",
+    world: worldState,
+    myId,
+    generator: {
+      version: WORLD_VERSION,
+      pattern: "samurai-cross-v1"
+    }
+  }));
 
-            // Salva su Firebase il singolo numero scritto (per il salvataggio mondiale)
-            database.ref(`worldState/zones/${msg.zoneKey}/writes/${k}`).set(writeData);
+  ws.on("message", (message) => {
+    let msg;
 
-            // Broadcast in tempo reale a TUTTI i player del numero appena scritto
-            wss.clients.forEach(client => {
-                if (client.readyState === 1) {
-                    client.send(JSON.stringify({ 
-                        type: "write", 
-                        zoneKey: msg.zoneKey, 
-                        cx: msg.cx, 
-                        cy: msg.cy, 
-                        val: msg.val, 
-                        color: msg.color 
-                    }));
-                }
-            });
+    try {
+      msg = JSON.parse(message);
+    } catch (err) {
+      return;
+    }
+
+    if (msg.type === "join") {
+      players[myId].name = msg.name;
+      players[myId].color = msg.color || "#38bdf8";
+      broadcastPlayers();
+    }
+
+    else if (msg.type === "move") {
+      const nx = Number(msg.x);
+      const ny = Number(msg.y);
+
+      if (!Number.isFinite(nx) || !Number.isFinite(ny)) {
+        return;
+      }
+
+      // Opzionale: blocca movimento verso zone vuote anche lato server.
+      // Funziona solo se x/y sono coordinate globali di cella.
+      if (SERVER_BLOCK_EMPTY_MOVEMENT && !isPlayableCell(nx, ny)) {
+        ws.send(JSON.stringify({
+          type: "move_rejected",
+          reason: "empty_zone",
+          x: players[myId].x,
+          y: players[myId].y
+        }));
+        return;
+      }
+
+      players[myId].x = nx;
+      players[myId].y = ny;
+
+      broadcastPlayers();
+    }
+
+    else if (msg.type === "fetch_zone") {
+      if (!msg.zoneKey) return;
+
+      const zoneKey = String(msg.zoneKey);
+      const { zx, zy } = parseZoneKey(zoneKey);
+
+      const playable = isPlayableZone(zx, zy);
+      const zoneData = worldState.zones[zoneKey];
+
+      const payload = {
+        type: "zone_info",
+        zoneKey,
+        playable,
+        writes: zoneData && zoneData.writes ? zoneData.writes : {}
+      };
+
+      // Se il client lo chiede, possiamo inviare anche la soluzione base della zona.
+      // Utile solo se non vuoi calcolarla lato client.
+      if (playable && msg.includeSolution) {
+        payload.solution = zoneSolutionPayload(zx, zy);
+      }
+
+      ws.send(JSON.stringify(payload));
+
+      // Compatibilità con il messaggio vecchio
+      if (zoneData && zoneData.writes) {
+        ws.send(JSON.stringify({
+          type: "zone_writes",
+          zoneKey: zoneKey,
+          writes: zoneData.writes
+        }));
+      }
+    }
+
+    else if (msg.type === "write") {
+      if (!msg.zoneKey) return;
+
+      const zoneKey = String(msg.zoneKey);
+      const { zx, zy } = parseZoneKey(zoneKey);
+
+      const cx = Number(msg.cx);
+      const cy = Number(msg.cy);
+      const val = Number(msg.val);
+
+      if (
+        ![0, 1, 2].includes(cx) ||
+        ![0, 1, 2].includes(cy) ||
+        !Number.isFinite(val) ||
+        val < 1 ||
+        val > 9
+      ) {
+        return;
+      }
+
+      // Non si può scrivere nei blocchi vuoti
+      if (!isPlayableZone(zx, zy)) {
+        ws.send(JSON.stringify({
+          type: "write_rejected",
+          zoneKey,
+          reason: "empty_zone"
+        }));
+        return;
+      }
+
+      if (!worldState.zones[zoneKey]) {
+        worldState.zones[zoneKey] = { writes: {} };
+      }
+
+      const k = `${cx},${cy}`;
+      const writeData = {
+        val,
+        color: msg.color
+      };
+
+      worldState.zones[zoneKey].writes[k] = writeData;
+
+      // Salva su Firebase il singolo numero scritto
+      database.ref(`worldState/zones/${zoneKey}/writes/${k}`).set(writeData);
+
+      // Broadcast in tempo reale a tutti i player
+      wss.clients.forEach(client => {
+        if (client.readyState === 1) {
+          client.send(JSON.stringify({
+            type: "write",
+            zoneKey,
+            cx,
+            cy,
+            val,
+            color: msg.color
+          }));
         }
-    });
+      });
+    }
+  });
 
-    ws.on("close", () => {
-        delete players[myId];
-        broadcastPlayers();
-    });
+  ws.on("close", () => {
+    delete players[myId];
+    broadcastPlayers();
+  });
 });
 
 // Endpoint per ricevere il salvataggio delle statistiche utente via sendBeacon
 app.post('/save-stats', (req, res) => {
-    const { uid, stats } = req.body;
-    if (uid && stats) {
-        database.ref('users/' + uid).update(stats)
-            .then(() => res.status(200).send('Salvato'))
-            .catch(err => res.status(500).send('Errore Salvataggio'));
-    } else {
-        res.status(400).send('Dati mancanti');
-    }
+  const { uid, stats } = req.body;
+
+  if (uid && stats) {
+    database.ref('users/' + uid).update(stats)
+      .then(() => res.status(200).send('Salvato'))
+      .catch(() => res.status(500).send('Errore Salvataggio'));
+  } else {
+    res.status(400).send('Dati mancanti');
+  }
 });
