@@ -412,7 +412,7 @@ aside#tips kbd {
 }
 
 .toast {
-    background: rgba(15, 23, 42, .85);
+    background: rgba(15, 23, 42, 0.267);
     color: #e2e8f0;
     font-size: .8rem;
     font-weight: 700;
@@ -422,12 +422,12 @@ aside#tips kbd {
 }
 
 .toast.gold {
-    background: rgba(250, 204, 21, .92);
+    background: rgba(250, 204, 21, 0.164);
     color: #713f12;
 }
 
 .toast.bad {
-    background: rgba(220, 38, 38, .9);
+    background: rgba(220, 38, 38, 0.514);
 }
 
 #vignette {

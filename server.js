@@ -364,7 +364,6 @@ wss.on("connection", (ws) => {
         return;
       }
 
-      // Non si può scrivere nei blocchi vuoti
       if (!isPlayableZone(zx, zy)) {
         ws.send(JSON.stringify({
           type: "write_rejected",
@@ -386,10 +385,10 @@ wss.on("connection", (ws) => {
 
       worldState.zones[zoneKey].writes[k] = writeData;
 
-      // Salva su Firebase il singolo numero scritto
+      // Salva su Firebase
       database.ref(`worldState/zones/${zoneKey}/writes/${k}`).set(writeData);
 
-      // Broadcast in tempo reale a tutti i player
+      // Broadcast a tutti i player connessi con coordinate complete
       wss.clients.forEach(client => {
         if (client.readyState === 1) {
           client.send(JSON.stringify({
@@ -397,6 +396,8 @@ wss.on("connection", (ws) => {
             zoneKey,
             cx,
             cy,
+            gx: msg.gx,
+            gy: msg.gy,
             val,
             color: msg.color
           }));

@@ -801,12 +801,26 @@ function unitInfo(t, idx) {
     return out;
 }
 function checkUnits() {
-    const k = curZone.x + "," + curZone.y;
     const { ox, oy } = winOrigin();
 
     for (const t of ["row", "col", "box"]) {
         for (let idx = 0; idx < 9; idx++) {
-            const uk = k + "|" + t + idx;
+            
+            // Genera una chiave GLOBALE e univoca invece di una basata su curZone
+            let uk = "";
+            if (t === "row") {
+                const globalY = oy + idx;
+                uk = `row|${globalY}`;
+            } else if (t === "col") {
+                const globalX = ox + idx;
+                uk = `col|${globalX}`;
+            } else {
+                const globalZx = (winZone.x - 1) + (idx % 3);
+                const globalZy = (winZone.y - 1) + Math.floor(idx / 3);
+                uk = `box|${globalZx},${globalZy}`;
+            }
+
+            // Se l'unità globale è già stata premiata, la ignora
             if (doneUnits.has(uk)) continue;
 
             const cellsU = unitInfo(t, idx);
@@ -835,9 +849,10 @@ function checkUnits() {
 
             if (hasWall || !full) continue;
 
+            // Registra la chiave globale per evitare premi duplicati al movimento
             doneUnits.add(uk);
 
-            // Completata solo da givens: nessun premio.
+            // Completata solo da numeri iniziali (givens): nessun premio XP
             if (!write) continue;
 
             gainXp(20);
@@ -850,7 +865,6 @@ function checkUnits() {
             );
 
             const els = [];
-
             for (const [cx, cy] of cellsU) {
                 els.push(cellEls.get(cx + "," + cy));
             }
@@ -868,13 +882,12 @@ function checkUnits() {
                     delay: AN.stagger(10)
                 });
             }
-
-            confetti(40);
         }
     }
 
-    // Completamento finestra attiva: conta solo celle giocabili.
-    if (!doneWindows.has(k)) {
+    // Controllo completamento della finestra attiva 9x9
+    const windowKey = winZone.x + "," + winZone.y;
+    if (!doneWindows.has(windowKey)) {
         let full = true;
         let write = false;
         let hasPlayable = false;
@@ -882,14 +895,13 @@ function checkUnits() {
         outer:
         for (let dy = -1; dy <= 1; dy++) {
             for (let dx = -1; dx <= 1; dx++) {
-                const z = getZone(curZone.x + dx, curZone.y + dy);
+                const z = getZone(winZone.x + dx, winZone.y + dy);
 
                 if (!z) {
                     full = false;
                     break outer;
                 }
 
-                // Le zone vuote non fanno parte del completamento.
                 if (z.empty) continue;
 
                 hasPlayable = true;
@@ -910,44 +922,16 @@ function checkUnits() {
         }
 
         if (hasPlayable && full) {
-            doneWindows.add(k);
+            doneWindows.add(windowKey);
 
             if (write) {
                 gainXp(150);
-
-                const els = [];
-
-                for (let y = 0; y < 9; y++) {
-                    for (let x = 0; x < 9; x++) {
-                        const cx = ox + x;
-                        const cy = oy + y;
-
-                        if (isPlayableCell(cx, cy)) {
-                            els.push(cellEls.get(cx + "," + cy));
-                        }
-                    }
-                }
-
-                if (AN) {
-                    AN({
-                        targets: els.filter(Boolean),
-                        keyframes: [
-                            { scale: 1 },
-                            { scale: 1.22, textShadow: "0 0 18px rgba(250,204,21,.95)" },
-                            { scale: 1, textShadow: "0 0 0 rgba(250,204,21,0)" }
-                        ],
-                        duration: 600,
-                        easing: "easeInOutQuad",
-                        delay: AN.stagger(14)
-                    });
-                }
-
-                confetti(110);
                 showWin();
             }
         }
     }
 }
+
 function showWin() {
     const w = document.getElementById("win");
     document.getElementById("winTxt").textContent = "+150 XP · Livello " + level;
@@ -1065,50 +1049,83 @@ function toast(msg, cls) {
     });
     else setTimeout(() => t.remove(), 2000);
 }
-function confetti(n) {
-    if (!AN) return;
-    const cols = ["#f43f5e", "#f59e0b", "#22c55e", "#3b82f6", "#a855f7", "#fde68a"];
-    for (let i = 0; i < n; i++) {
-        const c = document.createElement("div"); c.className = "confetti";
-        c.style.left = Math.random() * 100 + "vw"; c.style.background = cols[R(cols.length)];
-        document.body.appendChild(c);
-        AN({
-            targets: c, translateY: [{ value: "-5vh" }, { value: "108vh" }], rotate: R(720) - 360, opacity: [1, 1, 0],
-            duration: 2400 + R(1600), delay: R(700), easing: "easeInQuad", complete: () => c.remove()
-        });
-    }
-}
 
 /* ========== MAPPA ========== */
 const mapWrap = document.getElementById("mapWrap"), mapC = document.getElementById("mapC"), ctx = mapC.getContext("2d");
 const view = { cx: 0, cy: 0, zoom: 26 };
-function openMap() { mapMode = true; mapWrap.style.display = "block"; view.cx = curZone.x; view.cy = curZone.y; drawMap(); }
+function openMap() { mapMode = true; mapWrap.style.display = "block"; view.cx = curZone.x; view.cy = curZone.y; drawMinimap(); }
 function closeMap() { mapMode = false; mapWrap.style.display = "none"; }
 function zoneProgress(z) {
     if (!z.h0) return 1;
     const hidden = pc((~(z.rev | z.wr)) & 511);
     return 1 - hidden / z.h0;
 }
-function drawMap() {
-    const w = mapC.width = innerWidth, h = mapC.height = innerHeight;
-    ctx.fillStyle = "#232733"; ctx.fillRect(0, 0, w, h);
-    const S = view.zoom;
-    for (const [k, z] of zones) {
-        if (!z.disc) continue;
-        const [zx, zy] = k.split(",").map(Number);
-        const px = (zx - view.cx) * S + w / 2, py = (zy - view.cy) * S + h / 2;
-        if (px < -S || py < -S || px > w || py > h) continue;
-        const p = zoneProgress(z);
-        const r = Math.round(255 - 58 * p), g = 255, b = Math.round(255 - 161 * p);
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        ctx.fillRect(px + S * .06, py + S * .06, S * .88, S * .88);
+function drawMinimap() {
+    const mapCanvas = document.getElementById("mapC");
+    if (!mapCanvas) return;
+    const ctxMap = mapCanvas.getContext("2d");
+
+    mapCanvas.width = mapWrap.clientWidth || window.innerWidth;
+    mapCanvas.height = mapWrap.clientHeight || window.innerHeight;
+
+    ctxMap.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+    const mapBlockSize = view.zoom || 26; 
+    const mapCenterX = mapCanvas.width / 2;
+    const mapCenterY = mapCanvas.height / 2;
+
+    const centerZx = view.cx;
+    const centerZy = view.cy;
+
+    const rangeX = Math.ceil(mapCanvas.width / (2 * mapBlockSize)) + 1;
+    const rangeY = Math.ceil(mapCanvas.height / (2 * mapBlockSize)) + 1;
+
+    for (let zx = Math.floor(centerZx - rangeX); zx <= Math.ceil(centerZx + rangeX); zx++) {
+        for (let zy = Math.floor(centerZy - rangeY); zy <= Math.ceil(centerZy + rangeY); zy++) {
+            
+            if (!isPlayableZone(zx, zy)) continue;
+
+            const z = getZone(zx, zy);
+
+            // 1. FILTRO SCOPERTA: Disegna solo se la zona esiste ed è stata scoperta
+            if (!z || !z.disc) continue;
+
+            const screenX = mapCenterX + (zx - centerZx) * mapBlockSize;
+            const screenY = mapCenterY + (zy - centerZy) * mapBlockSize;
+
+            // 2. GRADIENTE VERDE: Calcola il progresso (da 0.0 a 1.0)
+            const progress = zoneProgress(z);
+
+            // Transizione HSL: da verde chiarissimo (0%) a verde pieno/scuro (100%)
+            const saturation = Math.round(35 + progress * 55); // da 35% a 90%
+            const lightness = Math.round(92 - progress * 50);  // da 92% a 42%
+            const fillColor = `hsl(142, ${saturation}%, ${lightness}%)`;
+
+            // Disegna il blocco 3x3
+            ctxMap.fillStyle = fillColor;
+            ctxMap.fillRect(screenX, screenY, mapBlockSize - 2, mapBlockSize - 2);
+
+            ctxMap.strokeStyle = "#94a3b8";
+            ctxMap.lineWidth = 1;
+            ctxMap.strokeRect(screenX, screenY, mapBlockSize - 2, mapBlockSize - 2);
+        }
     }
-    const px = (curZone.x - view.cx) * S + w / 2, py = (curZone.y - view.cy) * S + h / 2;
-    ctx.strokeStyle = "#fde68a"; ctx.lineWidth = 2; ctx.strokeRect(px + S * .06, py + S * .06, S * .88, S * .88);
+
+    // Posizione del giocatore
+    const playerBlockX = player.x / 3;
+    const playerBlockY = player.y / 3;
+
+    const playerScreenX = mapCenterX + (playerBlockX - centerZx) * mapBlockSize;
+    const playerScreenY = mapCenterY + (playerBlockY - centerZy) * mapBlockSize;
+
+    ctxMap.fillStyle = "#ef4444";
+    ctxMap.beginPath();
+    ctxMap.arc(playerScreenX, playerScreenY, Math.max(3, mapBlockSize / 5), 0, Math.PI * 2);
+    ctxMap.fill();
 }
 mapWrap.addEventListener("wheel", e => {
     e.preventDefault();
-    view.zoom = Math.max(8, Math.min(120, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); drawMap();
+    view.zoom = Math.max(8, Math.min(120, view.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); drawMinimap();
 }, { passive: false });
 
 /* ========== INPUT ========== */
@@ -1120,9 +1137,9 @@ document.addEventListener("keydown", e => {
     if (mapMode) {
         if (k === "m" || k === "escape") { closeMap(); return; }
         const pan = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
-        if (pan) { view.cx += pan[0] * Math.max(1, 20 / view.zoom); view.cy += pan[1] * Math.max(1, 20 / view.zoom); drawMap(); e.preventDefault(); return; }
-        if (k === "q" || k === "-") { view.zoom = Math.max(8, view.zoom / 1.2); drawMap(); return; }
-        if (k === "e" || k === "+" || k === "=") { view.zoom = Math.min(120, view.zoom * 1.2); drawMap(); return; }
+        if (pan) { view.cx += pan[0] * Math.max(1, 20 / view.zoom); view.cy += pan[1] * Math.max(1, 20 / view.zoom); drawMinimap(); e.preventDefault(); return; }
+        if (k === "q" || k === "-") { view.zoom = Math.max(8, view.zoom / 1.2); drawMinimap(); return; }
+        if (k === "e" || k === "+" || k === "=") { view.zoom = Math.min(120, view.zoom * 1.2); drawMinimap(); return; }
         return;
     }
     if (k === "tab") {
@@ -1396,18 +1413,17 @@ function saveLocalPlayerStats() {
 }
 
 // Salva su Firebase quando il giocatore chiude/aggiorna la pagina
-window.addEventListener('beforeunload', (e) => {
-    saveLocalPlayerStats(); // Salva prima in locale per sicurezza
+window.addEventListener('beforeunload', () => {
+    saveLocalPlayerStats();
 
-    const user = firebase.auth().currentUser;
+    const user = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth().currentUser : null;
     if (user) {
         playerStats.id = user.uid;
         playerStats.name = myName;
 
-        // Usa navigator.sendBeacon per inviare dati in modo affidabile alla chiusura
-        // Creiamo un endpoint Express rapido sul server per riceverlo
         const payload = JSON.stringify({ uid: user.uid, stats: playerStats });
-        navigator.sendBeacon('http://localhost:8080/save-stats', payload);
+        const blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon('http://localhost:8080/save-stats', blob);
     }
 });
 
@@ -1424,10 +1440,8 @@ respawn = function () {
 document.getElementById("startGameBtn").onclick = () => {
     myName = document.getElementById("usernameInput").value || "Guest";
 
-    // Verifica che Firebase Auth sia pronto
     const user = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth().currentUser : null;
 
-    // Se non c'è utente autenticato (es. nessun Wi-Fi o SSL bloccato), passa all'offline
     if (!user) {
         startOfflineMode();
         return;
@@ -1437,7 +1451,6 @@ document.getElementById("startGameBtn").onclick = () => {
     playerStats.id = user.uid;
     playerStats.name = myName;
 
-    // Caricamento da Firebase con fallback in locale se fallisce
     firebase.database().ref("users/" + user.uid).once("value")
         .then((snapshot) => {
             if (snapshot.exists()) {
@@ -1452,119 +1465,9 @@ document.getElementById("startGameBtn").onclick = () => {
             connectWebSocket();
         })
         .catch((err) => {
-            console.warn("Impossibile connettersi al database, avvio offline:", err);
+            console.warn("Impossibile connettersi al database, avvio in modalità locale:", err);
             startOfflineMode();
         });
-    
-
-    playerStats.id = user.uid;
-    playerStats.name = myName;
-
-    // Carichiamo prima i dati dal DB di Firebase
-    firebase.database().ref("users/" + user.uid).once("value").then((snapshot) => {
-        if (snapshot.exists()) {
-            const dbStats = snapshot.val();
-            playerStats = { ...playerStats, ...dbStats };
-
-            level = playerStats.level;
-            xp = playerStats.xp;
-
-            updateBars();
-        } else {
-            // Primo accesso: crea record utente su Firebase
-            firebase.database().ref("users/" + user.uid).set(playerStats);
-        }
-
-        loadLocalPlayerStats();
-
-        // Connessione WebSocket
-        ws = new WebSocket("ws://localhost:8080");
-
-        ws.onopen = () => {
-            ws.send(JSON.stringify({
-                type: "join",
-                name: myName,
-                color: myColor
-            }));
-
-            // Fallback: se il server non manda init in tempo, avviamo comunque il mondo.
-            setTimeout(() => {
-                if (!worldInitialized) {
-                    fit();
-                    newWorld();
-                    worldInitialized = true;
-                }
-            }, 800);
-        };
-
-        ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-
-            if (msg.type === "init") {
-                myId = msg.myId;
-
-                // Se il server manda un seed condiviso, lo usiamo.
-                // Se non lo manda, resta il worldSeed costante definito prima.
-                if (msg.world && msg.world.seed) {
-                    const s = Number(msg.world.seed);
-
-                    if (Number.isFinite(s)) {
-                        worldSeed = s;
-                        seed = s;
-                    }
-                }
-
-                // IMPORTANTE:
-                // Non sovrascrivere globalSolution/immortalMask col vecchio sistema.
-                // Ora il mondo viene generato deterministicamente da newWorld().
-                if (!worldInitialized) {
-                    fit();
-                    newWorld();
-                    worldInitialized = true;
-                }
-            }
-
-            else if (msg.type === "players") {
-                updateOtherPlayers(msg.data);
-            }
-
-            else if (msg.type === "zone_info") {
-                const [zx, zy] = String(msg.zoneKey).split(",").map(Number);
-
-                const z = getZone(zx, zy);
-
-                if (z) {
-                    z.empty = !msg.playable;
-                }
-
-                if (msg.playable && msg.writes) {
-                    applyRemoteWrites(msg.zoneKey, msg.writes);
-                }
-            }
-
-            else if (msg.type === "zone_writes") {
-                applyRemoteWrites(msg.zoneKey, msg.writes);
-            }
-
-            else if (msg.type === "write") {
-                applyRemoteWrite(msg);
-            }
-
-            else if (msg.type === "write_rejected") {
-                if (msg.reason === "empty_zone") {
-                    toast("Non puoi scrivere qui!", "bad");
-                }
-            }
-
-            else if (msg.type === "move_rejected") {
-                if (Number.isFinite(msg.x) && Number.isFinite(msg.y)) {
-                    player.x = msg.x;
-                    player.y = msg.y;
-                    placePlayer();
-                }
-            }
-        };
-    });
 };
 
 // Helper per avviare la partita in locale
