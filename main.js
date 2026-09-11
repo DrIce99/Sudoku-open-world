@@ -218,11 +218,13 @@ function buildViewSolution(centerZx, centerZy) {
 
 const pendingWrites = new Map();
 
+// Invia la scoperta della zona al server
 function requestZone(zx, zy) {
-    if (typeof ws !== "undefined" && ws && ws.readyState === 1) {
+    if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({
             type: "fetch_zone",
-            zoneKey: zKey(zx, zy)
+            zoneKey: zKey(zx, zy),
+            discover: true
         }));
     }
 }
@@ -805,7 +807,7 @@ function checkUnits() {
 
     for (const t of ["row", "col", "box"]) {
         for (let idx = 0; idx < 9; idx++) {
-            
+
             // Genera una chiave GLOBALE e univoca invece di una basata su curZone
             let uk = "";
             if (t === "row") {
@@ -1070,7 +1072,7 @@ function drawMinimap() {
 
     ctxMap.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
 
-    const mapBlockSize = view.zoom || 26; 
+    const mapBlockSize = view.zoom || 26;
     const mapCenterX = mapCanvas.width / 2;
     const mapCenterY = mapCanvas.height / 2;
 
@@ -1082,7 +1084,7 @@ function drawMinimap() {
 
     for (let zx = Math.floor(centerZx - rangeX); zx <= Math.ceil(centerZx + rangeX); zx++) {
         for (let zy = Math.floor(centerZy - rangeY); zy <= Math.ceil(centerZy + rangeY); zy++) {
-            
+
             if (!isPlayableZone(zx, zy)) continue;
 
             const z = getZone(zx, zy);
@@ -1304,26 +1306,31 @@ document.getElementById("loginBtn").onclick = () => {
     });
 };
 
+// Renderizza gli altri giocatori in tempo reale con il nome sopra
 function updateOtherPlayers(list) {
     const currentIds = new Set();
     list.forEach(p => {
         if (p.id === myId) return;
         currentIds.add(p.id);
+
         let el = otherPlayersEls.get(p.id);
         if (!el) {
             el = document.createElement("div");
             el.className = "other-player";
-            el.innerHTML = '<span class="p-name"></span>';
+            el.innerHTML = `<span class="p-name"></span>`;
             worldEl.appendChild(el);
             otherPlayersEls.set(p.id, el);
         }
-        el.style.setProperty('--p-color', p.color);
+
+        el.style.setProperty('--p-color', p.color || '#38bdf8');
         el.style.left = p.x * CELL + "px";
         el.style.top = p.y * CELL + "px";
-        el.querySelector(".p-name").textContent = p.name;
+
+        const nameTag = el.querySelector(".p-name");
+        if (nameTag) nameTag.textContent = p.name || "Guest";
     });
 
-    // Rimuovi player disconnessi
+    // Rimuove i giocatori disconnessi
     for (const [id, el] of otherPlayersEls) {
         if (!currentIds.has(id)) {
             el.remove();
@@ -1436,10 +1443,8 @@ respawn = function () {
 };
 
 // Inizializza al login
-// Inizializza al login
 document.getElementById("startGameBtn").onclick = () => {
     myName = document.getElementById("usernameInput").value || "Guest";
-
     const user = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth().currentUser : null;
 
     if (!user) {
@@ -1448,24 +1453,36 @@ document.getElementById("startGameBtn").onclick = () => {
     }
 
     document.getElementById("loginScreen").style.display = "none";
-    playerStats.id = user.uid;
-    playerStats.name = myName;
+    createPlayerIdBadge(user.uid);
 
+    // Recupero dati completo da Firebase DB
     firebase.database().ref("users/" + user.uid).once("value")
         .then((snapshot) => {
             if (snapshot.exists()) {
-                playerStats = { ...playerStats, ...snapshot.val() };
-                level = playerStats.level;
-                xp = playerStats.xp;
-                updateBars();
+                const data = snapshot.val();
+
+                // Ripristino Statistiche
+                playerStats = { ...playerStats, ...data };
+                level = data.level || 1;
+                xp = data.xp || 0;
+                hp = data.hp || 100;
+                maxHp = data.maxHp || 100;
+
+                // Ripristino Posizione disconnessione
+                if (data.x !== undefined && data.y !== undefined) {
+                    player.x = data.x;
+                    player.y = data.y;
+                    curZone = zOf(player.x, player.y);
+                }
             } else {
-                firebase.database().ref("users/" + user.uid).set(playerStats);
+                savePlayerData();
             }
-            loadLocalPlayerStats();
+
+            updateBars();
             connectWebSocket();
         })
         .catch((err) => {
-            console.warn("Impossibile connettersi al database, avvio in modalità locale:", err);
+            console.warn("Errore caricamento Firebase, avvio locale:", err);
             startOfflineMode();
         });
 };
@@ -1491,55 +1508,99 @@ if (offlineBtn) {
 }
 
 // Connessione WebSocket separata e sicura contro i crash offline
+// Inizializzazione WebSocket con ascolto eventi in tempo reale
 function connectWebSocket() {
-  try {
-    ws = new WebSocket("ws://localhost:8080");
+    try {
+        ws = new WebSocket("ws://localhost:8080");
 
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join", name: myName, color: myColor }));
-      setTimeout(() => {
-        if (!worldInitialized) {
-          fit();
-          newWorld();
-          worldInitialized = true;
-        }
-      }, 800);
-    };
+        ws.onopen = () => {
+            ws.send(JSON.stringify({
+                type: "join",
+                name: myName,
+                color: myColor,
+                x: player.x,
+                y: player.y
+            }));
+        };
 
-    ws.onerror = () => {
-      console.warn("Server WebSocket non raggiungibile. Proseguo in locale.");
-      if (!worldInitialized) {
-        fit();
-        newWorld();
-        worldInitialized = true;
-      }
-    };
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "init") {
-        myId = msg.myId;
-        if (msg.world && msg.world.seed) {
-          worldSeed = Number(msg.world.seed) || worldSeed;
-          seed = worldSeed;
-        }
-        if (!worldInitialized) {
-          fit();
-          newWorld();
-          worldInitialized = true;
-        }
-      } else if (msg.type === "players") {
-        updateOtherPlayers(msg.data);
-      } else if (msg.type === "write") {
-        applyRemoteWrite(msg);
-      }
-    };
-  } catch (e) {
-    console.warn("WebSocket non disponibile:", e);
-    if (!worldInitialized) {
-      fit();
-      newWorld();
-      worldInitialized = true;
+            if (msg.type === "init") {
+                myId = msg.myId;
+            }
+            else if (msg.type === "players") {
+                updateOtherPlayers(msg.data);
+            }
+            else if (msg.type === "write") {
+                applyRemoteWrite(msg);
+                if (mapMode) drawMinimap();
+            }
+            else if (msg.type === "zone_discovered") {
+                const [zx, zy] = msg.zoneKey.split(',').map(Number);
+                const z = getZone(zx, zy);
+                if (z) {
+                    z.disc = true;
+                } else {
+                    requestZone(zx, zy);
+                }
+                if (mapMode) drawMinimap();
+            }
+            else if (msg.type === "zone_info") {
+                const [zx, zy] = msg.zoneKey.split(',').map(Number);
+                const z = getZone(zx, zy);
+                if (z) {
+                    if (msg.disc) z.disc = true;
+                    if (msg.writes) applyRemoteWrites(msg.zoneKey, msg.writes);
+                }
+                if (mapMode) drawMinimap();
+            }
+        };
+    } catch (e) {
+        console.warn("WebSocket non disponibile, modalità offline active.", e);
     }
-  }
 }
+
+// UI Badge per ID Giocatore nell'angolo dello schermo
+function createPlayerIdBadge(idText) {
+    let badge = document.getElementById("playerIdBadge");
+    if (!badge) {
+        badge = document.createElement("div");
+        badge.id = "playerIdBadge";
+        badge.style.cssText = "position:fixed; bottom:12px; right:12px; background:rgba(15,23,42,0.85); color:#94a3b8; padding:6px 12px; border-radius:8px; font-size:12px; font-family:monospace; border:1px solid #334155; z-index:1000; pointer-events:none;";
+        document.body.appendChild(badge);
+    }
+    badge.textContent = `ID: ${idText}`;
+}
+
+// Funzione di Salvataggio unificata del Player su Firebase RTDB
+function savePlayerData() {
+    const user = (typeof firebase !== "undefined" && firebase.auth) ? firebase.auth().currentUser : null;
+    if (!user) return;
+
+    playerStats.id = user.uid;
+    playerStats.name = myName;
+    playerStats.x = player.x;
+    playerStats.y = player.y;
+    playerStats.level = level;
+    playerStats.xp = xp;
+    playerStats.hp = hp;
+    playerStats.maxHp = maxHp;
+
+    firebase.database().ref("users/" + user.uid).update(playerStats);
+    saveLocalPlayerStats();
+}
+
+// Gestione messaggi ricevuti dal WebSocket
+function handleServerMessages(msg) {
+    if (msg.type === "zone_info") {
+        const z = getZone(...parseZoneKey(msg.zoneKey));
+        if (z) {
+            if (msg.disc) z.disc = true;
+            if (msg.writes) applyRemoteWrites(msg.zoneKey, msg.writes);
+        }
+    }
+}
+
+// Auto-Salvataggio su eventi chiave e prima della chiusura pagina
+window.addEventListener('beforeunload', savePlayerData);
