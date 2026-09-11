@@ -1460,15 +1460,12 @@ document.getElementById("startGameBtn").onclick = () => {
         .then((snapshot) => {
             if (snapshot.exists()) {
                 const data = snapshot.val();
-
-                // Ripristino Statistiche
                 playerStats = { ...playerStats, ...data };
                 level = data.level || 1;
                 xp = data.xp || 0;
                 hp = data.hp || 100;
                 maxHp = data.maxHp || 100;
 
-                // Ripristino Posizione disconnessione
                 if (data.x !== undefined && data.y !== undefined) {
                     player.x = data.x;
                     player.y = data.y;
@@ -1479,7 +1476,10 @@ document.getElementById("startGameBtn").onclick = () => {
             }
 
             updateBars();
-            connectWebSocket();
+            fit();
+            newWorld();          // genera/mostra il mondo e nasconde il loader
+            worldInitialized = true;
+            connectWebSocket();  // connettiti dopo aver avviato il mondo
         })
         .catch((err) => {
             console.warn("Errore caricamento Firebase, avvio locale:", err);
