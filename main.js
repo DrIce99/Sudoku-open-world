@@ -415,6 +415,95 @@ function createNum(cx, cy, v, cls) {
     return el;
 }
 function removeNum(cx, cy) { const k = cx + "," + cy; const el = cellEls.get(k); if (el) { el.remove(); cellEls.delete(k); } }
+// Genera (se non esiste già) i dati e la resa visiva di UNA singola zona 3x3.
+// Usata sia da ensureWindow (esplorazione locale) sia quando arriva una
+// notifica "zone_discovered" da un altro player per una zona non ancora vista.
+function genSingleZone(tzx, tzy) {
+    const key = zKey(tzx, tzy);
+    const existing = getZone(tzx, tzy);
+    if (existing) return existing;
+
+    const ox = tzx * 3;
+    const oy = tzy * 3;
+
+    const playable = isPlayableZone(tzx, tzy);
+
+    // Riflesso visivo della zona.
+    const reflEl = document.createElement("div");
+    reflEl.className = "zone-refl";
+    reflEl.style.left = ox * CELL + "px";
+    reflEl.style.top = oy * CELL + "px";
+    worldEl.appendChild(reflEl);
+
+    // ZONA VUOTA / MURO
+    if (!playable) {
+        reflEl.classList.add("empty");
+
+        const z = {
+            v: new Uint8Array(9),
+            rev: 0,
+            wr: 0,
+            h0: 0,
+            disc: false,
+            diff: "empty",
+            empty: true
+        };
+        zones.set(key, z);
+
+        requestZone(tzx, tzy);
+        flushPendingWrites(key);
+        return z;
+    }
+
+    // ZONA GIOCABILE
+    const rng = mulberry32(zoneSeed(tzx, tzy));
+
+    const roll = rng();
+    let diff = "easy";
+    if (roll > 0.7) diff = "hard";
+    else if (roll > 0.4) diff = "mid";
+
+    reflEl.classList.add(diff);
+
+    const v = new Uint8Array(9);
+    let rev = 0;
+
+    const p = REVEAL[diff];
+
+    for (let ly = 0; ly < 3; ly++) {
+        for (let lx = 0; lx < 3; lx++) {
+            const worldX = ox + lx;
+            const worldY = oy + ly;
+            const li = ly * 3 + lx;
+
+            const val = solutionAtCell(worldX, worldY);
+            v[li] = val;
+
+            const immortal = isImmortalCell(worldX, worldY);
+
+            if (immortal || rng() < p) {
+                rev |= 1 << li;
+                createNum(worldX, worldY, val, "given");
+            }
+        }
+    }
+
+    const z = {
+        v,
+        rev,
+        wr: 0,
+        h0: 9 - pc(rev),
+        disc: false,
+        diff,
+        empty: false
+    };
+    zones.set(key, z);
+
+    requestZone(tzx, tzy);
+    flushPendingWrites(key);
+    return z;
+}
+
 function ensureWindow(zx, zy) {
     if (doneWindows.has(zKey(zx, zy))) return false;
 
@@ -434,86 +523,7 @@ function ensureWindow(zx, zy) {
     if (!missing.length) return false;
 
     for (const m of missing) {
-        const tzx = zx + m.dx;
-        const tzy = zy + m.dy;
-        const key = zKey(tzx, tzy);
-
-        const ox = tzx * 3;
-        const oy = tzy * 3;
-
-        const playable = isPlayableZone(tzx, tzy);
-
-        // Riflesso visivo della zona.
-        const reflEl = document.createElement("div");
-        reflEl.className = "zone-refl";
-        reflEl.style.left = ox * CELL + "px";
-        reflEl.style.top = oy * CELL + "px";
-        worldEl.appendChild(reflEl);
-
-        // ZONA VUOTA / MURO
-        if (!playable) {
-            reflEl.classList.add("empty");
-
-            zones.set(key, {
-                v: new Uint8Array(9),
-                rev: 0,
-                wr: 0,
-                h0: 0,
-                disc: false,
-                diff: "empty",
-                empty: true
-            });
-
-            requestZone(tzx, tzy);
-            flushPendingWrites(key);
-            continue;
-        }
-
-        // ZONA GIOCANILE
-        const rng = mulberry32(zoneSeed(tzx, tzy));
-
-        const roll = rng();
-        let diff = "easy";
-        if (roll > 0.7) diff = "hard";
-        else if (roll > 0.4) diff = "mid";
-
-        reflEl.classList.add(diff);
-
-        const v = new Uint8Array(9);
-        let rev = 0;
-
-        const p = REVEAL[diff];
-
-        for (let ly = 0; ly < 3; ly++) {
-            for (let lx = 0; lx < 3; lx++) {
-                const worldX = ox + lx;
-                const worldY = oy + ly;
-                const li = ly * 3 + lx;
-
-                const val = solutionAtCell(worldX, worldY);
-                v[li] = val;
-
-                const immortal = isImmortalCell(worldX, worldY);
-
-                if (immortal || rng() < p) {
-                    rev |= 1 << li;
-                    createNum(worldX, worldY, val, "given");
-                }
-            }
-        }
-
-        zones.set(key, {
-            v,
-            rev,
-            wr: 0,
-            h0: 9 - pc(rev),
-            disc: false,
-            diff,
-            empty: false
-        });
-
-        requestZone(tzx, tzy);
-        flushPendingWrites(key);
+        genSingleZone(zx + m.dx, zy + m.dy);
     }
 
     return true;
@@ -566,11 +576,28 @@ function updateCoords() {
     if (elZ) elZ.textContent = `Zona: ${Math.floor(player.x / 3)}, ${Math.floor(player.y / 3)}`;
 }
 
+let lastSentX = null;
+let lastSentY = null;
+
+// Funzione helper per inviare la posizione solo quando cambia realmente
+function sendPlayerMove() {
+    if (ws && ws.readyState === 1 && (player.x !== lastSentX || player.y !== lastSentY)) {
+        lastSentX = player.x;
+        lastSentY = player.y;
+        ws.send(JSON.stringify({
+            type: "move",
+            x: player.x,
+            y: player.y
+        }));
+    }
+}
+
 function placePlayer() {
     playerEl.style.left = player.x * CELL + "px";
     playerEl.style.top = player.y * CELL + "px";
     highlight();
     updateCoords(); // Aggiorna l'HUD delle coordinate
+    sendPlayerMove(); // Notifica sempre il server dello spostamento
 }
 function inLock(x, y) { return !lockRect || (x >= lockRect.x0 && x <= lockRect.x1 && y >= lockRect.y0 && y <= lockRect.y1); }
 function bump() { if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 }); }
@@ -768,24 +795,15 @@ function eraseCur() {
 
     if (!isPlayableCell(cx, cy)) return;
 
+    // Le note a matita restano cancellabili liberamente.
     if (notesMask.has(k)) {
         notesMask.delete(k);
         renderNotes(cx, cy);
         return;
     }
 
-    const z = getZone(curZone.x, curZone.y);
-
-    if (z && !z.empty) {
-        const li = zLocal(cx, cy);
-        const m = 1 << li;
-
-        if (z.wr & m) {
-            z.wr &= ~m;
-            removeNum(cx, cy);
-        }
-    }
-
+    // I numeri scritti (propri o altrui) sono PERMANENTI una volta inseriti:
+    // niente cancellazione, né locale né di conseguenza sul server.
     highlight();
 }
 
@@ -1294,7 +1312,10 @@ async function newWorld() {
 let ws;
 let myId = null;
 let myName = "";
-let myColor = "#1d4ed8";
+// Colore con cui GLI ALTRI ti vedono (marker + numeri che scrivi).
+// Deve essere diverso dal blu del TUO player/numeri (var(--user) = #1d4ed8 in CSS),
+// altrimenti tutti i giocatori sembrano avere lo stesso colore agli occhi altrui.
+let myColor = "#7dd3fc"; // azzurro più chiaro
 const otherPlayersEls = new Map();
 let worldInitialized = false;
 
@@ -1338,23 +1359,6 @@ function updateOtherPlayers(list) {
         }
     }
 }
-
-// Modifica tryMove per inviare la posizione
-const originalTryMove = tryMove;
-tryMove = function (dx, dy) {
-    const oldX = player.x;
-    const oldY = player.y;
-
-    originalTryMove(dx, dy);
-
-    if ((player.x !== oldX || player.y !== oldY) && ws && ws.readyState === 1) {
-        ws.send(JSON.stringify({
-            type: "move",
-            x: player.x,
-            y: player.y
-        }));
-    }
-};
 
 // Modifica doWrite per inviare il numero scritto
 const originalDoWrite = doWrite;
@@ -1457,29 +1461,46 @@ document.getElementById("startGameBtn").onclick = () => {
 
     // Recupero dati completo da Firebase DB
     firebase.database().ref("users/" + user.uid).once("value")
-        .then((snapshot) => {
+        .then(async (snapshot) => {
+            let savedX = null;
+            let savedY = null;
+
             if (snapshot.exists()) {
                 const data = snapshot.val();
+
+                // Ripristino Statistiche
                 playerStats = { ...playerStats, ...data };
                 level = data.level || 1;
                 xp = data.xp || 0;
                 hp = data.hp || 100;
                 maxHp = data.maxHp || 100;
 
+                // Salva temporaneamente le coordinate caricate
                 if (data.x !== undefined && data.y !== undefined) {
-                    player.x = data.x;
-                    player.y = data.y;
-                    curZone = zOf(player.x, player.y);
+                    savedX = data.x;
+                    savedY = data.y;
                 }
             } else {
                 savePlayerData();
             }
 
             updateBars();
+
+            // Inizializza la vista e il mondo (nascondendo il loader)
             fit();
-            newWorld();          // genera/mostra il mondo e nasconde il loader
+            await newWorld();
             worldInitialized = true;
-            connectWebSocket();  // connettiti dopo aver avviato il mondo
+
+            // Se il giocatore aveva una posizione salvata, ripristinala dopo newWorld()
+            if (savedX !== null && savedY !== null) {
+                player.x = savedX;
+                player.y = savedY;
+                curZone = zOf(player.x, player.y);
+                placePlayer();
+                recenter(false);
+            }
+
+            connectWebSocket();
         })
         .catch((err) => {
             console.warn("Errore caricamento Firebase, avvio locale:", err);
@@ -1521,6 +1542,8 @@ function connectWebSocket() {
                 x: player.x,
                 y: player.y
             }));
+            lastSentX = player.x;
+            lastSentY = player.y;
         };
 
         ws.onmessage = (event) => {
@@ -1538,12 +1561,11 @@ function connectWebSocket() {
             }
             else if (msg.type === "zone_discovered") {
                 const [zx, zy] = msg.zoneKey.split(',').map(Number);
-                const z = getZone(zx, zy);
-                if (z) {
-                    z.disc = true;
-                } else {
-                    requestZone(zx, zy);
-                }
+                // Se non l'abbiamo ancora generata localmente, la generiamo adesso
+                // (algoritmo deterministico: risulta identica su tutti i client)
+                // così la scoperta si riflette subito anche su chi non è passato di lì.
+                const z = getZone(zx, zy) || genSingleZone(zx, zy);
+                z.disc = true;
                 if (mapMode) drawMinimap();
             }
             else if (msg.type === "zone_info") {

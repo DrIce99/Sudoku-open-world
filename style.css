@@ -142,6 +142,11 @@ body {
     color: var(--user);
 }
 
+.num.written_other {
+    /* fallback se per qualche motivo non arriva il colore inline del player */
+    color: #7dd3fc;
+}
+
 .notesAbs {
     position: absolute;
     width: var(--cell);
@@ -643,27 +648,36 @@ aside#tips kbd {
   outline: 1px solid rgba(255,255,255,0.06);
 }
 
+/* Contenitore altro giocatore: solo bordo colorato attorno alla cella */
 .other-player {
     position: absolute;
     width: var(--cell);
     height: var(--cell);
-    background: var(--p-color, #38bdf8);
-    border-radius: 50%;
-    transition: left 0.1s linear, top 0.1s linear;
-    z-index: 10;
+    border: 2px solid var(--p-color, #38bdf8);
+    box-sizing: border-box;
+    background: transparent !important;
     pointer-events: none;
+    z-index: 10;
+    transition: left 0.12s ease-out, top 0.12s ease-out; /* rende il movimento degli altri fluido */
 }
 
+/* Rimuove qualsiasi pallino o cerchio pieno centrale */
+.other-player::before,
+.other-player::after {
+    display: none !important;
+    content: none !important;
+}
+
+/* Nome del giocatore posizionato sopra la cella */
 .other-player .p-name {
     position: absolute;
-    top: -20px;
+    top: -18px;
     left: 50%;
     transform: translateX(-50%);
-    background: rgba(15, 23, 42, 0.85);
-    color: #ffffff;
-    padding: 2px 6px;
-    border-radius: 4px;
     font-size: 11px;
+    font-weight: bold;
+    color: var(--p-color, #38bdf8);
     white-space: nowrap;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+    pointer-events: none;
 }
