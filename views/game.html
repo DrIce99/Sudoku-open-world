@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinitedoku - World</title>
+    <link rel="stylesheet" href="/css/game.css">
+</head>
+<body>
+    <div id="game-container">
+        <header class="game-hud">
+            <div class="player-info">
+                <a href="/" class="btn-back">← Home</a>
+                <span id="hud-username">Giocatore</span>
+            </div>
+            <div class="stats-hud">
+                <span>Posizione: <strong id="hud-pos">0, 0</strong></span>
+            </div>
+        </header>
+
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="controls-overlay">
+            <p>Usa WASD o le Frecce per muoverti. Premi i tasti 1-9 per scrivere nel tile corrente.</p>
+        </div>
+    </div>
+
+    <script src="/js/game.js"></script>
+</body>
+</html>

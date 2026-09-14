@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Infinitedoku - Home</title>
+    <link rel="stylesheet" href="/css/home.css">
+</head>
+<body>
+
+    <div class="home-container">
+        <!-- Header con profilo Player -->
+        <div class="player-header">
+            <h2 id="player-username">Caricamento...</h2>
+            <p id="player-id" class="subtext"></p>
+        </div>
+
+        <!-- Menu Principale -->
+        <div class="menu-container">
+            <a href="/game" class="btn-menu play">ENTRA NEL MONDO (PLAY)</a>
+
+            <!-- Sezione Statistiche Player -->
+            <div class="stats-card">
+                <h3>Le tue Statistiche</h3>
+                <div class="stat-item">
+                    <span>Sudoku Completati:</span>
+                    <strong id="stat-completed">0</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Cifre Inserite:</span>
+                    <strong id="stat-placed">0</strong>
+                </div>
+                <div class="stat-item">
+                    <span>Errori commessi:</span>
+                    <strong id="stat-wrong">0</strong>
+                </div>
+            </div>
+
+            <a href="/logout" class="btn-menu logout">LOG OUT</a>
+        </div>
+    </div>
+
+    <script src="/js/home.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Infinitedoku - Login</title>
+    <link rel="stylesheet" href="/css/login.css">
+    <!-- Firebase App & Auth SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+</head>
+<body>
+    <div class="login-card">
+        <h1>INFINITEDOKU</h1>
+        <p class="subtitle">Open World Sudoku Multiplayer</p>
+
+        <div id="login-section">
+            <button id="google-login-btn" class="btn-google">
+                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
+                Accedi con Google
+            </button>
+        </div>
+
+        <div id="username-section" class="hidden">
+            <h3>Scegli il tuo Username</h3>
+            <input type="text" id="username-input" placeholder="Min. 3 caratteri">
+            <button id="save-username-btn" class="btn-primary">Salva ed Entra</button>
+        </div>
+    </div>
+
+    <script src="/js/login.js"></script>
+</body>
+</html>
