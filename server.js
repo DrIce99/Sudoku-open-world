@@ -3,6 +3,9 @@ import { WebSocketServer } from "ws";
 import fs from "fs";
 import { initializeApp, cert } from "firebase-admin/app";
 import { getDatabase } from "firebase-admin/database";
+import http from "http";
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 // Inizializza Firebase Admin SDK
 const serviceAccount = JSON.parse(fs.readFileSync('./serviceAccountKey.json', 'utf8'));
@@ -18,7 +21,7 @@ const app = express();
 app.use(express.json());
 
 const PORT = 8080;
-const server = app.listen(PORT, () => console.log(`Server Sudoku attivo su porta ${PORT}`));
+const server = http.createServer(app);
 
 const wss = new WebSocketServer({ server });
 
@@ -184,49 +187,34 @@ database.ref("worldState").get().then((snapshot) => {
     if (snapshot.exists()) {
         const loaded = snapshot.val();
 
-        // Se il mondo è vecchio, rigeneriamo il nuovo mondo samurai.
         if (Number(loaded.version) !== WORLD_VERSION) {
             console.log("Vecchio mondo rilevato. Genero nuovo mondo samurai...");
-
             let preserved = {};
-
             if (PRESERVE_OLD_WRITES_ON_RESET && loaded.zones) {
                 for (const [zoneKey, zoneData] of Object.entries(loaded.zones)) {
                     const { zx, zy } = parseZoneKey(zoneKey);
-
                     if (isPlayableZone(zx, zy) && zoneData && zoneData.writes) {
                         preserved[zoneKey] = { writes: zoneData.writes };
                     }
                 }
             }
-
             worldState = buildInitialWorld(preserved);
             database.ref("worldState").set(worldState);
-
-            console.log("Nuovo mondo samurai salvato su Firebase.");
         } else {
             worldState = loaded;
-
             if (!worldState.zones) worldState.zones = {};
-
-            if (worldState.globalSolution) {
-                worldState.globalSolution = Object.values(worldState.globalSolution);
-            }
-
-            if (worldState.immortalMask) {
-                worldState.immortalMask = Object.values(worldState.immortalMask);
-            }
-
+            if (worldState.globalSolution) worldState.globalSolution = Object.values(worldState.globalSolution);
+            if (worldState.immortalMask) worldState.immortalMask = Object.values(worldState.immortalMask);
             console.log("Mondo caricato da Firebase.");
         }
     } else {
         console.log("Generazione nuovo mondo su Firebase...");
-
         worldState = buildInitialWorld();
         database.ref("worldState").set(worldState);
-
-        console.log("Nuovo mondo samurai salvato su Firebase.");
     }
+
+    // Il server si attiva solo dopo aver caricato i dati da Firebase
+    server.listen(PORT, () => console.log(`Server Sudoku attivo su porta ${PORT}`));
 });
 
 // Manda a tutti la lista aggiornata dei player online
@@ -302,27 +290,20 @@ wss.on("connection", (ws) => {
                 worldState.zones[zoneKey] = { writes: {}, disc: false };
             }
 
-            // Se la zona viene scoperta per la prima volta, notifica subito TUTTI i giocatori online
+            // Mantiene traccia sul DB che la zona è stata visitata nel mondo, 
+            // ma non forza la scoperta visiva sulla mappa degli altri giocatori
             if (msg.discover && !worldState.zones[zoneKey].disc) {
                 worldState.zones[zoneKey].disc = true;
                 database.ref(`worldState/zones/${zoneKey}/disc`).set(true);
-
-                wss.clients.forEach(client => {
-                    if (client.readyState === 1) {
-                        client.send(JSON.stringify({
-                            type: "zone_discovered",
-                            zoneKey
-                        }));
-                    }
-                });
             }
 
             const zoneData = worldState.zones[zoneKey];
+
+            // Invia solo le scritture salvate. La mappa (disc) resta individuale lato client.
             ws.send(JSON.stringify({
                 type: "zone_info",
                 zoneKey,
                 playable,
-                disc: zoneData.disc || false,
                 writes: zoneData.writes || {}
             }));
         }
@@ -336,10 +317,13 @@ wss.on("connection", (ws) => {
             if (!isPlayableZone(zx, zy)) return;
 
             if (!worldState.zones[zoneKey]) {
-                worldState.zones[zoneKey] = { writes: {}, disc: true };
+                worldState.zones[zoneKey] = { writes: {}, disc: false };
             }
 
-            worldState.zones[zoneKey].disc = true;
+            // 2. Assicura che l'oggetto 'writes' esista nella zona
+            if (!worldState.zones[zoneKey].writes) {
+                worldState.zones[zoneKey].writes = {};
+            }
             const writeData = { val, color: msg.color };
             worldState.zones[zoneKey].writes[`${cx},${cy}`] = writeData;
 

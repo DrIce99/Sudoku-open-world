@@ -236,7 +236,7 @@ function applyRemoteWrite(msg) {
 
     const z = getZone(zx, zy);
 
-    // Se la zona non è ancora stata generata, mette in coda.
+    // Se la zona non è ancora stata generata, mette in coda la scrittura
     if (!z) {
         if (!pendingWrites.has(msg.zoneKey)) {
             pendingWrites.set(msg.zoneKey, []);
@@ -249,12 +249,10 @@ function applyRemoteWrite(msg) {
 
     let gx, gy;
 
-    // Nuovi client mandano gx/gy globali.
     if (Number.isFinite(msg.gx) && Number.isFinite(msg.gy)) {
         gx = msg.gx;
         gy = msg.gy;
     } else {
-        // Fallback: cx/cy locali alla zona.
         const lx = mod(Number(msg.cx), 3);
         const ly = mod(Number(msg.cy), 3);
         gx = zx * 3 + lx;
@@ -264,13 +262,16 @@ function applyRemoteWrite(msg) {
     const li = zLocal(gx, gy);
     const m = 1 << li;
 
-    // Non sovrascrivere givens o numeri già scritti.
+    // Non sovrascrivere numeri iniziali (givens) o già scritti
     if ((z.rev & m) || (z.wr & m)) return;
 
     z.wr |= m;
 
+    // Fallback su colore chiaro visibile (#38bdf8) se il colore salvato è scuro o assente
+    const displayColor = (msg.color && msg.color !== "#1d4ed8") ? msg.color : "#38bdf8";
+
     const el = createNum(gx, gy, msg.val, "written_other");
-    if (msg.color) el.style.color = msg.color;
+    if (el) el.style.color = displayColor;
 
     if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
         highlight();
@@ -1459,7 +1460,6 @@ document.getElementById("startGameBtn").onclick = () => {
     document.getElementById("loginScreen").style.display = "none";
     createPlayerIdBadge(user.uid);
 
-    // Recupero dati completo da Firebase DB
     firebase.database().ref("users/" + user.uid).once("value")
         .then(async (snapshot) => {
             let savedX = null;
@@ -1468,14 +1468,12 @@ document.getElementById("startGameBtn").onclick = () => {
             if (snapshot.exists()) {
                 const data = snapshot.val();
 
-                // Ripristino Statistiche
                 playerStats = { ...playerStats, ...data };
                 level = data.level || 1;
                 xp = data.xp || 0;
                 hp = data.hp || 100;
                 maxHp = data.maxHp || 100;
 
-                // Salva temporaneamente le coordinate caricate
                 if (data.x !== undefined && data.y !== undefined) {
                     savedX = data.x;
                     savedY = data.y;
@@ -1486,16 +1484,19 @@ document.getElementById("startGameBtn").onclick = () => {
 
             updateBars();
 
-            // Inizializza la vista e il mondo (nascondendo il loader)
             fit();
             await newWorld();
             worldInitialized = true;
 
-            // Se il giocatore aveva una posizione salvata, ripristinala dopo newWorld()
+            // Se il giocatore ha coordinate salvate, le imposta e genera le zone circostanti
             if (savedX !== null && savedY !== null) {
                 player.x = savedX;
                 player.y = savedY;
                 curZone = zOf(player.x, player.y);
+                
+                // Forza la generazione locale delle zone attorno alla posizione salvata
+                enterZone(curZone.x, curZone.y);
+                
                 placePlayer();
                 recenter(false);
             }
@@ -1544,6 +1545,12 @@ function connectWebSocket() {
             }));
             lastSentX = player.x;
             lastSentY = player.y;
+
+            // Richiede al server le scritture salvate per tutte le zone attualmente in memoria
+            for (const key of zones.keys()) {
+                const [zx, zy] = key.split(',').map(Number);
+                requestZone(zx, zy);
+            }
         };
 
         ws.onmessage = (event) => {
@@ -1559,27 +1566,18 @@ function connectWebSocket() {
                 applyRemoteWrite(msg);
                 if (mapMode) drawMinimap();
             }
-            else if (msg.type === "zone_discovered") {
-                const [zx, zy] = msg.zoneKey.split(',').map(Number);
-                // Se non l'abbiamo ancora generata localmente, la generiamo adesso
-                // (algoritmo deterministico: risulta identica su tutti i client)
-                // così la scoperta si riflette subito anche su chi non è passato di lì.
-                const z = getZone(zx, zy) || genSingleZone(zx, zy);
-                z.disc = true;
-                if (mapMode) drawMinimap();
-            }
+            // NOTA: zone_info carica solo le scritture (numbers), la scoperta della zona resta personale
             else if (msg.type === "zone_info") {
                 const [zx, zy] = msg.zoneKey.split(',').map(Number);
                 const z = getZone(zx, zy);
-                if (z) {
-                    if (msg.disc) z.disc = true;
-                    if (msg.writes) applyRemoteWrites(msg.zoneKey, msg.writes);
+                if (z && msg.writes) {
+                    applyRemoteWrites(msg.zoneKey, msg.writes);
                 }
                 if (mapMode) drawMinimap();
             }
         };
     } catch (e) {
-        console.warn("WebSocket non disponibile, modalità offline active.", e);
+        console.warn("WebSocket non disponibile, modalità offline attiva.", e);
     }
 }
 
