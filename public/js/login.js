@@ -13,41 +13,57 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const provider = new firebase.auth.GoogleAuthProvider();
 
-document.getElementById("google-login-btn").addEventListener("click", async () => {
-    try {
-        const result = await firebase.auth().signInWithPopup(provider);
-        const idToken = await result.user.getIdToken();
+document.addEventListener("DOMContentLoaded", () => {
+    document.getElementById("google-login-btn").addEventListener("click", async () => {
+        try {
+            const result = await firebase.auth().signInWithPopup(provider);
+            const idToken = await result.user.getIdToken();
 
-        const res = await fetch("/api/login", {
+            const res = await fetch("/api/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ idToken })
+            });
+
+            const data = await res.json();
+
+            if (data.status === "need_username") {
+                document.getElementById("login-section").classList.add("hidden");
+                document.getElementById("username-section").classList.remove("hidden");
+            } else if (data.status === "success") {
+                window.location.href = "/";
+            }
+        } catch (err) {
+            alert("Errore di autenticazione: " + err.message);
+        }
+    });
+
+    document.getElementById("save-username-btn").addEventListener("click", async () => {
+        const username = document.getElementById("username-input").value;
+        const res = await fetch("/api/set-username", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ idToken })
+            body: JSON.stringify({ username })
         });
-
         const data = await res.json();
-
-        if (data.status === "need_username") {
-            document.getElementById("login-section").classList.add("hidden");
-            document.getElementById("username-section").classList.remove("hidden");
-        } else if (data.status === "success") {
+        if (data.status === "success") {
             window.location.href = "/";
+        } else {
+            alert(data.message);
         }
-    } catch (err) {
-        alert("Errore di autenticazione: " + err.message);
-    }
-});
-
-document.getElementById("save-username-btn").addEventListener("click", async () => {
-    const username = document.getElementById("username-input").value;
-    const res = await fetch("/api/set-username", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username })
     });
-    const data = await res.json();
-    if (data.status === "success") {
-        window.location.href = "/";
-    } else {
-        alert(data.message);
-    }
+
+
+    document.getElementById("guest-login-btn")?.addEventListener("click", async () => {
+        try {
+            const res = await fetch("/api/guest-login", { method: "POST" });
+            const data = await res.json();
+            if (data.status === "success") {
+                window.location.href = "/game";
+            }
+        } catch (err) {
+            console.warn("Server offline, reindirizzamento diretto al gioco.");
+            window.location.href = "/game";
+        }
+    });
 });

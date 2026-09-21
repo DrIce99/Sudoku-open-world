@@ -4,27 +4,89 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Infinitedoku - World</title>
+    <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/game.css">
 </head>
 <body>
-    <div id="game-container">
-        <header class="game-hud">
-            <div class="player-info">
-                <a href="/" class="btn-back">← Home</a>
-                <span id="hud-username">Giocatore</span>
-            </div>
-            <div class="stats-hud">
-                <span>Posizione: <strong id="hud-pos">0, 0</strong></span>
-            </div>
-        </header>
 
-        <canvas id="gameCanvas"></canvas>
+    <!-- Barra sottile Home / Username (sopra al motore di gioco) -->
+    <header class="game-hud">
+        <div class="player-info">
+            <a href="/" class="btn-back">← Home</a>
+            <span id="hud-username">Giocatore</span>
+        </div>
+    </header>
 
-        <div id="controls-overlay">
-            <p>Usa WASD o le Frecce per muoverti. Premi i tasti 1-9 per scrivere nel tile corrente.</p>
+    <!-- ===== MOTORE DI GIOCO (zone, camera, sudoku, XP, multiplayer) ===== -->
+    <div id="stage">
+        <div id="gridBg"></div>
+        <div id="world">
+            <div id="activeBox"></div>
+            <div id="player"></div>
         </div>
     </div>
 
+    <aside id="tips">
+        <h2>Comandi</h2>
+        <p>
+            <kbd>WASD</kbd> / <kbd>Frecce</kbd> muovi<br>
+            <kbd>1-9</kbd> scrivi numero<br>
+            <kbd>R</kbd> blocca/sblocca vista<br>
+            <kbd>M</kbd> mappa &nbsp; <kbd>Tab</kbd> mostra/nascondi aiuto
+        </p>
+    </aside>
+
+    <div id="coordsHud">
+        <span class="label">POSIZIONE</span>
+        <div class="vals">
+            <span>X <strong id="coordX">0</strong></span>
+            <span>Y <strong id="coordY">0</strong></span>
+        </div>
+        <div class="zone" id="coordZ">Zona: 0, 0</div>
+    </div>
+
+    <div id="lockBadge">Vista bloccata</div>
+
+    <div id="hud">
+        <div class="barRow">
+            <span class="lbl">HP</span>
+            <div class="bar"><div id="hpFill" class="fill"></div></div>
+            <span id="hpText" class="lbl">100 / 100</span>
+        </div>
+        <div class="barRow">
+            <span class="lbl">XP</span>
+            <div class="bar"><div id="xpFill" class="fill"></div></div>
+            <span id="lvl" class="lbl">LV 1</span>
+        </div>
+    </div>
+
+
+    <div id="toasts"></div>
+    <div id="vignette"></div>
+
+    <div id="win" class="hide">
+        <div class="card">
+            <h2>Finestra completata!</h2>
+            <p id="winTxt">+150 XP</p>
+            <button id="againBtn" class="btn">Continua a giocare</button>
+        </div>
+    </div>
+
+    <div id="mapWrap">
+        <canvas id="mapC"></canvas>
+        <div id="mapHint">WASD/Frecce per spostare la mappa · Q/E per zoom · M o Esc per chiudere</div>
+    </div>
+
+    <div id="loader">
+        <svg class="ring" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="40"></circle>
+        </svg>
+        <div id="phase">Preparazione del mondo…</div>
+        <div id="barWrap"><div id="bar"></div></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <script src="/js/game.js"></script>
+    <script src="/js/bossSystem.js"></script>
 </body>
 </html>

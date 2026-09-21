@@ -29,6 +29,10 @@ export async function getPlayerData(userId) {
         name: "",
         username: null,
         created_at: FieldValue.serverTimestamp(),
+        level: 1,
+        xp: 0,
+        hp: 100,
+        maxHp: 100,
         stats: {
             completedSudokus: 0,
             placedNumbers: 0,

@@ -655,16 +655,22 @@ function tryMove(dx, dy) {
     placePlayer();
 }
 function toggleLock() {
+    // Impedisce di disattivare il blocco fotocamera se si è dentro l'area di un Boss
+    if (window.bossManager && window.bossManager.forcedCameraBoss) {
+        toast("Non puoi disattivare la fotocamera nell'area del Boss!", "bad");
+        return;
+    }
+
     follow = !follow;
     if (!follow) {
         lockRect = { x0: (curZone.x - 1) * 3, y0: (curZone.y - 1) * 3, x1: (curZone.x - 1) * 3 + 8, y1: (curZone.y - 1) * 3 + 8 };
         activeBox.classList.add("locked");
         document.getElementById("lockBadge").style.display = "block";
     } else {
-        lockRect = null; activeBox.classList.remove("locked");
+        lockRect = null;
+        activeBox.classList.remove("locked");
         document.getElementById("lockBadge").style.display = "none";
         curZone = zOf(player.x, player.y);
-        // MODIFICA: Non chiamiamo enterZone qui per evitare che lo sblocco generi numeri extra dal nulla
         recenter(true);
         checkUnits();
         highlight();
@@ -1170,7 +1176,15 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (k === "m") { openMap(); return; }
-    if (k === "r") { toggleLock(); return; }
+    if (k === "r") {
+        // Durante la bossfight il blocco manuale viene completamente inibito
+        if (window.bossManager && window.bossManager.isBossFightActive()) {
+            return;
+        }
+
+        toggleLock();
+        return;
+    }
     if (k === "n") { toggleNotes(); return; }
     const mv = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
     if (mv) { tryMove(mv[0], mv[1]); e.preventDefault(); return; }
@@ -1493,10 +1507,10 @@ document.getElementById("startGameBtn").onclick = () => {
                 player.x = savedX;
                 player.y = savedY;
                 curZone = zOf(player.x, player.y);
-                
+
                 // Forza la generazione locale delle zone attorno alla posizione salvata
                 enterZone(curZone.x, curZone.y);
-                
+
                 placePlayer();
                 recenter(false);
             }
@@ -1509,19 +1523,31 @@ document.getElementById("startGameBtn").onclick = () => {
         });
 };
 
-// Helper per avviare la partita in locale
+// Gestione avvio completo in modalità locale
 function startOfflineMode() {
     myName = document.getElementById("usernameInput")?.value || "Giocatore Offline";
-    document.getElementById("loginScreen").style.display = "none";
+    playerStats.isGuest = true;
 
+    const loginScreen = document.getElementById("loginScreen");
+    if (loginScreen) loginScreen.style.display = "none";
+
+    // Carica i dati salvati in localStorage
     loadLocalPlayerStats();
+
+    // Se esiste una connessione WS aperta, la chiude in modo pulito
+    if (ws) {
+        try { ws.close(); } catch (e) { }
+        ws = null;
+    }
+
     fit();
     newWorld();
     worldInitialized = true;
-    toast("Modalità Offline", "gold");
+
+    toast("Modalità Offline Attiva", "gold");
 }
 
-// Gestione pulsante Offline
+// Collegamento del pulsante offline nella modale di benvenuto in-game
 const offlineBtn = document.getElementById("offlineBtn");
 if (offlineBtn) {
     offlineBtn.onclick = () => {
@@ -1529,9 +1555,14 @@ if (offlineBtn) {
     };
 }
 
-// Connessione WebSocket separata e sicura contro i crash offline
-// Inizializzazione WebSocket con ascolto eventi in tempo reale
+// Connessione WebSocket tollerante agli errori
 function connectWebSocket() {
+    // Se l'utente è un ospite o la rete non è disponibile, evita del tutto la connessione
+    if (playerStats.isGuest || !navigator.onLine) {
+        console.log("Modalità offline: sincronizzazione WebSocket disabilitata.");
+        return;
+    }
+
     try {
         ws = new WebSocket("ws://localhost:8080");
 
@@ -1546,38 +1577,36 @@ function connectWebSocket() {
             lastSentX = player.x;
             lastSentY = player.y;
 
-            // Richiede al server le scritture salvate per tutte le zone attualmente in memoria
             for (const key of zones.keys()) {
                 const [zx, zy] = key.split(',').map(Number);
                 requestZone(zx, zy);
             }
         };
 
+        ws.onerror = () => {
+            console.warn("Server WebSocket non raggiungibile. Modalità offline attiva.");
+            if (ws) ws.close();
+            ws = null;
+        };
+
         ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
-
-            if (msg.type === "init") {
-                myId = msg.myId;
-            }
-            else if (msg.type === "players") {
-                updateOtherPlayers(msg.data);
-            }
+            if (msg.type === "init") myId = msg.myId;
+            else if (msg.type === "players") updateOtherPlayers(msg.data);
             else if (msg.type === "write") {
                 applyRemoteWrite(msg);
                 if (mapMode) drawMinimap();
             }
-            // NOTA: zone_info carica solo le scritture (numbers), la scoperta della zona resta personale
             else if (msg.type === "zone_info") {
                 const [zx, zy] = msg.zoneKey.split(',').map(Number);
                 const z = getZone(zx, zy);
-                if (z && msg.writes) {
-                    applyRemoteWrites(msg.zoneKey, msg.writes);
-                }
+                if (z && msg.writes) applyRemoteWrites(msg.zoneKey, msg.writes);
                 if (mapMode) drawMinimap();
             }
         };
     } catch (e) {
-        console.warn("WebSocket non disponibile, modalità offline attiva.", e);
+        console.warn("WebSocket non disponibile, fallback offline.", e);
+        ws = null;
     }
 }
 
@@ -1621,6 +1650,21 @@ function handleServerMessages(msg) {
         }
     }
 }
+
+let lastFrameTime = performance.now();
+
+function gameLoop(now) {
+    const deltaTime = now - lastFrameTime;
+    lastFrameTime = now;
+
+    if (window.bossManager) {
+        window.bossManager.update(deltaTime);
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
 
 // Auto-Salvataggio su eventi chiave e prima della chiusura pagina
 window.addEventListener('beforeunload', savePlayerData);
