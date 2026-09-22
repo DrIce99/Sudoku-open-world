@@ -273,6 +273,11 @@ function applyRemoteWrite(msg) {
     const el = createNum(gx, gy, msg.val, "written_other");
     if (el) el.style.color = displayColor;
 
+    // Hook per i boss: numero corretto inserito da un altro giocatore
+    if (msg.val && window.bossManager?.onNumberPlaced) {
+        window.bossManager.onNumberPlaced(gx, gy, msg.val, true);
+    }
+
     if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
         highlight();
     }
@@ -794,6 +799,11 @@ function doWrite(z, li, d) {
     gainXp(5);
     checkUnits();
     highlight();
+
+    // Hook per i boss: numero corretto inserito
+    if (window.bossManager?.onNumberPlaced) {
+        window.bossManager.onNumberPlaced(cx, cy, d, false);
+    }
 }
 function eraseCur() {
     const cx = player.x;
@@ -882,6 +892,11 @@ function checkUnits() {
             // Completata solo da numeri iniziali (givens): nessun premio XP
             if (!write) continue;
 
+            // Hook per i boss: riga / colonna / box 3x3 completata
+            if (window.bossManager?.onUnitCompleted) {
+                window.bossManager.onUnitCompleted(t, uk, cellsU);
+            }
+
             gainXp(20);
 
             toast(
@@ -950,8 +965,12 @@ function checkUnits() {
 
         if (hasPlayable && full) {
             doneWindows.add(windowKey);
-
             if (write) {
+                // Hook per i boss: finestra 9x9 completata
+                if (window.bossManager?.onWindowCompleted) {
+                    window.bossManager.onWindowCompleted(windowKey, winZone.x, winZone.y);
+                }
+
                 gainXp(150);
                 showWin();
             }
@@ -969,7 +988,29 @@ function showWin() {
 document.getElementById("againBtn").onclick = () => document.getElementById("win").classList.add("hide");
 
 /* ========== VITA / XP ========== */
-let level = 1, xp = 0, xpNeed = 100, maxHp = 100, hp = 100;
+let level = 1, xp = 0, xpNeed = 100, maxHp = 100, hp = 100, baseAtk = 10;
+
+function xpNeedForLevel(l) {
+    return Math.round(100 * Math.pow(1.5, Math.max(1, l) - 1));
+}
+
+function maxHpForLevel(l) {
+    return Math.round(100 * Math.pow(1.05, Math.max(1, l) - 1));
+}
+
+function baseAtkForLevel(l) {
+    return 10 + Math.floor((Math.max(1, l) - 1) * 2);
+}
+
+function applyDerivedStats() {
+    xpNeed = xpNeedForLevel(level);
+    maxHp = maxHpForLevel(level);
+    baseAtk = baseAtkForLevel(level);
+
+    if (!Number.isFinite(hp) || hp <= 0 || hp > maxHp) {
+        hp = maxHp;
+    }
+}
 const hpFill = document.getElementById("hpFill"), xpFill = document.getElementById("xpFill"), lvlEl = document.getElementById("lvl");
 function updateBars() {
     hpFill.style.width = Math.max(0, hp / maxHp * 100) + "%";
@@ -980,13 +1021,28 @@ function updateBars() {
 }
 function gainXp(n) {
     xp += n;
-    if (AN) AN({ targets: "#xpFill", scaleY: [1.6, 1], duration: 260, easing: "easeOutQuad" });
+
+    if (AN) {
+        AN({
+            targets: "#xpFill",
+            scaleY: [1.6, 1],
+            duration: 260,
+            easing: "easeOutQuad"
+        });
+    }
+
     while (xp >= xpNeed) {
-        xp -= xpNeed; level++;
-        xpNeed = Math.round(100 * Math.pow(1.5, level - 1));
-        maxHp = Math.round(maxHp * 1.05); hp = maxHp;
+        xp -= xpNeed;
+        level++;
+
+        xpNeed = xpNeedForLevel(level);
+        maxHp = maxHpForLevel(level);
+        baseAtk = baseAtkForLevel(level);
+
+        hp = maxHp;
         levelUpFx();
     }
+
     updateBars();
 }
 function levelUpFx() {

@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import session from "express-session";
 import { WebSocketServer } from "ws";
 import { auth, db, getPlayerData } from "./firebase.js";
+import { FieldValue } from "firebase-admin/firestore";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -13,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
 
 // Middleware
 app.use(express.json());
@@ -36,12 +37,100 @@ function requireAuth(req, res, next) {
     next();
 }
 
+function randomDiscriminator() {
+    return String(1000 + Math.floor(Math.random() * 9000));
+}
+
+function isValidUsername(username) {
+    const trimmed = String(username || "").trim();
+
+    if (trimmed.length < 3 || trimmed.length > 20) return false;
+
+    // Vieta caratteri che daremmo fastidio all'ID o alla sicurezza/UI
+    if (/[#<>\/\\{}]/.test(trimmed)) return false;
+
+    return true;
+}
+
+function sanitizePlayerIdBase(name) {
+    return String(name || "")
+        .trim()
+        .replace(/#/g, "")
+        .replace(/\s+/g, " ")
+        .slice(0, 20) || "Player";
+}
+
+async function reserveUniquePlayerId(baseName, uid) {
+    const base = sanitizePlayerIdBase(baseName);
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const candidate = `${base}#${randomDiscriminator()}`;
+        const ref = db.collection("playerIds").doc(candidate);
+
+        let reserved = false;
+
+        await db.runTransaction(async (t) => {
+            const snap = await t.get(ref);
+            if (snap.exists) return;
+
+            t.set(ref, {
+                uid,
+                createdAt: FieldValue.serverTimestamp()
+            });
+
+            reserved = true;
+        });
+
+        if (reserved) return candidate;
+    }
+
+    throw new Error("Impossibile generare un ID univoco");
+}
+
+async function ensurePlayerIdentity(userId) {
+    const userRef = db.collection("users").doc(userId);
+    const doc = await userRef.get();
+
+    let data = doc.exists ? doc.data() : await getPlayerData(userId);
+
+    // Migrazione: se un vecchio utente ha già username ma non playerId,
+    // generiamo l'ID pubblico una volta sola.
+    if (data.username && !data.playerId) {
+        const playerId = await reserveUniquePlayerId(data.username, userId);
+        await userRef.set({ playerId }, { merge: true });
+        data.playerId = playerId;
+    }
+
+    return data;
+}
+
+function normalizeProgress(data) {
+    const clean = { ...data };
+
+    // Non ci interessa salvare/usare hp e maxHp come dati persistenti
+    delete clean.hp;
+    delete clean.maxHp;
+
+    clean.level = Math.max(1, Math.floor(Number(clean.level) || 1));
+    clean.xp = Math.max(0, Math.floor(Number(clean.xp) || 0));
+
+    return clean;
+}
+
 // ==================== ROTTE HTML ====================
 
 app.get("/login", (req, res) => {
-    if (req.session.userId) {
+    // Se l'utente è già autenticato e ha già completato il profilo,
+    // lo mandiamo alla home. Se manca il nickname, lasciamo la pagina
+    // e il client mostrerà la sezione username.
+    if (req.session.userId && req.session.usernameSet && !req.session.isGuest) {
         return res.redirect("/");
     }
+
+    if (req.session.isGuest) {
+        return res.redirect("/game");
+    }
+
     res.sendFile(path.join(__dirname, "views", "login.html"));
 });
 
@@ -57,14 +146,18 @@ app.get("/game", requireAuth, (req, res) => {
 
 app.post("/api/login", async (req, res) => {
     const { idToken } = req.body;
+
     try {
         const decodedToken = await auth.verifyIdToken(idToken);
         const userId = decodedToken.uid;
 
-        req.session.userId = userId;
-        req.session.userName = decodedToken.name || "Player";
+        const playerData = await ensurePlayerIdentity(userId);
 
-        const playerData = await getPlayerData(userId);
+        req.session.userId = userId;
+        req.session.isGuest = false;
+        req.session.userName = playerData.username || decodedToken.name || "Player";
+        req.session.playerId = playerData.playerId || null;
+        req.session.usernameSet = !!playerData.username;
 
         if (!playerData.username) {
             return res.json({
@@ -73,7 +166,10 @@ app.post("/api/login", async (req, res) => {
             });
         }
 
-        res.json({ status: "success", user: playerData });
+        res.json({
+            status: "success",
+            user: normalizeProgress(playerData)
+        });
     } catch (error) {
         console.error("Errore Login:", error);
         res.status(401).json({ status: "error", message: error.message });
@@ -82,43 +178,155 @@ app.post("/api/login", async (req, res) => {
 
 // Aggiungi la rotta per il login Offline / Ospite prima delle API protette
 app.post("/api/guest-login", (req, res) => {
-    req.session.userId = "guest_" + Date.now();
+    req.session.userId = "guest_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
     req.session.userName = "Giocatore Offline";
     req.session.isGuest = true;
+    req.session.usernameSet = true;
+    req.session.playerId = `Guest#${randomDiscriminator()}`;
 
-    res.json({ status: "success" });
+    res.json({
+        status: "success",
+        playerId: req.session.playerId
+    });
+});
+
+app.get("/api/login-state", async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.json({
+                authenticated: false,
+                isGuest: false,
+                needUsername: false
+            });
+        }
+
+        if (req.session.isGuest) {
+            if (!req.session.playerId) {
+                req.session.playerId = `Guest#${randomDiscriminator()}`;
+            }
+
+            return res.json({
+                authenticated: true,
+                isGuest: true,
+                needUsername: false,
+                playerId: req.session.playerId
+            });
+        }
+
+        const data = await ensurePlayerIdentity(req.session.userId);
+
+        req.session.userName = data.username || req.session.userName || "Player";
+        req.session.playerId = data.playerId || null;
+        req.session.usernameSet = !!data.username;
+
+        res.json({
+            authenticated: true,
+            isGuest: false,
+            needUsername: !data.username,
+            playerId: data.playerId || null
+        });
+    } catch (err) {
+        console.error("Errore login-state:", err);
+        res.json({
+            authenticated: !!req.session.userId,
+            isGuest: !!req.session.isGuest,
+            needUsername: true
+        });
+    }
 });
 
 app.post("/api/set-username", requireAuth, async (req, res) => {
-    const { username } = req.body;
-    if (!username || username.trim().length < 3) {
-        return res.status(400).json({ status: "error", message: "Username troppo corto" });
+    if (req.session.isGuest) {
+        return res.status(400).json({
+            status: "error",
+            message: "Gli ospiti non hanno un nickname permanente"
+        });
     }
 
-    await db.collection("users").doc(req.session.userId).update({
-        username: username.trim()
-    });
+    const username = String(req.body.username || "").trim();
 
-    res.json({ status: "success" });
+    if (!isValidUsername(username)) {
+        return res.status(400).json({
+            status: "error",
+            message: "Nickname non valido: 3-20 caratteri, senza # < > / \\ { }"
+        });
+    }
+
+    const userRef = db.collection("users").doc(req.session.userId);
+    const doc = await userRef.get();
+    const data = doc.exists ? doc.data() : {};
+
+    // Il nickname può essere impostato UNA sola volta
+    if (data.username) {
+        return res.status(409).json({
+            status: "error",
+            message: "Nickname già impostato e non modificabile"
+        });
+    }
+
+    const playerId = await reserveUniquePlayerId(username, req.session.userId);
+
+    await userRef.set({
+        username,
+        playerId,
+        usernameSetAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    req.session.userName = username;
+    req.session.playerId = playerId;
+    req.session.usernameSet = true;
+
+    res.json({
+        status: "success",
+        username,
+        playerId
+    });
 });
 
 // Modifica la rotta /api/player per gestire la sessione ospite
 app.get("/api/player", requireAuth, async (req, res) => {
     try {
         if (req.session.isGuest) {
+            if (!req.session.playerId) {
+                req.session.playerId = `Guest#${randomDiscriminator()}`;
+            }
+
             return res.json({
                 status: "success",
                 data: {
                     username: req.session.userName || "Giocatore Offline",
+                    playerId: req.session.playerId,
                     isGuest: true,
-                    stats: { completedSudokus: 0, placedNumbers: 0, wrongPlacements: 0 }
+                    level: 1,
+                    xp: 0,
+                    stats: {
+                        completedSudokus: 0,
+                        placedNumbers: 0,
+                        wrongPlacements: 0
+                    }
                 }
             });
         }
 
-        const data = await getPlayerData(req.session.userId);
-        res.json({ status: "success", data });
+        const data = await ensurePlayerIdentity(req.session.userId);
+
+        if (!data.username) {
+            return res.json({
+                status: "need_username",
+                message: "Username richiesto"
+            });
+        }
+
+        req.session.userName = data.username;
+        req.session.playerId = data.playerId || null;
+        req.session.usernameSet = true;
+
+        res.json({
+            status: "success",
+            data: normalizeProgress(data)
+        });
     } catch (err) {
+        console.error("Errore /api/player:", err);
         res.status(500).json({ status: "error", message: err.message });
     }
 });
@@ -134,20 +342,33 @@ app.get("/logout", (req, res) => {
 
 app.post("/api/save-progress", requireAuth, async (req, res) => {
     if (req.session.isGuest) {
-        // Gli ospiti non hanno un profilo Firestore da aggiornare.
         return res.json({ status: "success", skipped: true });
     }
 
-    const { x, y, level, xp, hp, maxHp } = req.body || {};
+    const { x, y, level, xp } = req.body || {};
 
     try {
-        await db.collection("users").doc(req.session.userId).update({
-            ...(Number.isFinite(x) && Number.isFinite(y) ? { currentPosition: { x, y } } : {}),
-            ...(Number.isFinite(level) ? { level } : {}),
-            ...(Number.isFinite(xp) ? { xp } : {}),
-            ...(Number.isFinite(hp) ? { hp } : {}),
-            ...(Number.isFinite(maxHp) ? { maxHp } : {})
-        });
+        const update = {};
+
+        const lvl = Math.floor(Number(level));
+        const xpVal = Math.floor(Number(xp));
+
+        if (Number.isFinite(lvl) && lvl >= 1) {
+            update.level = lvl;
+        }
+
+        if (Number.isFinite(xpVal) && xpVal >= 0) {
+            update.xp = xpVal;
+        }
+
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            update.currentPosition = { x, y };
+        }
+
+        if (Object.keys(update).length) {
+            await db.collection("users").doc(req.session.userId).update(update);
+        }
+
         res.json({ status: "success" });
     } catch (err) {
         console.error("Errore salvataggio progressi:", err);
@@ -163,18 +384,28 @@ app.post("/api/save-stats", requireAuth, async (req, res) => {
     const body = req.body || {};
     const update = {};
 
-    if (Number.isFinite(body.level)) update.level = body.level;
-    if (Number.isFinite(body.xp)) update.xp = body.xp;
-    if (Number.isFinite(body.hp)) update.hp = body.hp;
-    if (Number.isFinite(body.maxHp)) update.maxHp = body.maxHp;
+    const lvl = Math.floor(Number(body.level));
+    const xpVal = Math.floor(Number(body.xp));
+
+    if (Number.isFinite(lvl) && lvl >= 1) update.level = lvl;
+    if (Number.isFinite(xpVal) && xpVal >= 0) update.xp = xpVal;
+
     if (Number.isFinite(body.x) && Number.isFinite(body.y)) {
         update.currentPosition = { x: body.x, y: body.y };
     }
+
     if (Number.isFinite(body.deaths)) update.deaths = body.deaths;
+
     if (body.stats && typeof body.stats === "object") {
-        if (Number.isFinite(body.stats.completedSudokus)) update["stats.completedSudokus"] = body.stats.completedSudokus;
-        if (Number.isFinite(body.stats.placedNumbers)) update["stats.placedNumbers"] = body.stats.placedNumbers;
-        if (Number.isFinite(body.stats.wrongPlacements)) update["stats.wrongPlacements"] = body.stats.wrongPlacements;
+        if (Number.isFinite(body.stats.completedSudokus)) {
+            update["stats.completedSudokus"] = body.stats.completedSudokus;
+        }
+        if (Number.isFinite(body.stats.placedNumbers)) {
+            update["stats.placedNumbers"] = body.stats.placedNumbers;
+        }
+        if (Number.isFinite(body.stats.wrongPlacements)) {
+            update["stats.wrongPlacements"] = body.stats.wrongPlacements;
+        }
     }
 
     try {
@@ -226,48 +457,90 @@ let players = {};
 
 function broadcastPlayers() {
     const playersData = Object.values(players).map(p => ({
-        id: p.id, x: p.x, y: p.y, name: p.name, color: p.color
+        id: p.connectionId,
+        connectionId: p.connectionId,
+        playerId: p.playerId,
+        x: p.x,
+        y: p.y,
+        name: p.name,
+        color: p.color
     }));
+
     wss.clients.forEach(client => {
         if (client.readyState === 1) {
-            client.send(JSON.stringify({ type: "players", data: playersData }));
+            client.send(JSON.stringify({
+                type: "players",
+                data: playersData
+            }));
         }
     });
 }
 
-wss.on("connection", (ws) => {
-    const myId = Math.random().toString(36).substr(2, 9);
+wss.on("connection", (ws, req) => {
+    const connectionId = Math.random().toString(36).substr(2, 9);
+    const session = req.session || {};
 
-    players[myId] = { id: myId, x: 4, y: 4, name: "Guest", color: "#38bdf8" };
+    // Se non c'è un playerId di sessione, usarne uno temporaneo
+    const playerId = session.playerId || `Guest#${randomDiscriminator()}`;
+    const displayName = session.userName || "Guest";
+
+    players[connectionId] = {
+        connectionId,
+        playerId,
+        authUserId: session.userId || null,
+        isGuest: !!session.isGuest,
+        x: 4,
+        y: 4,
+        name: displayName,
+        color: "#38bdf8"
+    };
 
     ws.send(JSON.stringify({
         type: "init",
-        myId,
-        generator: { seed: WORLD_SEED, pattern: "samurai-cross-v1" }
+        myId: connectionId,
+        myPlayerId: playerId,
+        generator: {
+            seed: WORLD_SEED,
+            pattern: "samurai-cross-v1"
+        }
     }));
 
     ws.on("message", (message) => {
         let msg;
-        try { msg = JSON.parse(message); } catch (e) { return; }
+        try {
+            msg = JSON.parse(message);
+        } catch (e) {
+            return;
+        }
+
+        const p = players[connectionId];
+        if (!p) return;
 
         if (msg.type === "join") {
-            players[myId].name = msg.name || "Guest";
-            players[myId].color = msg.color || "#38bdf8";
-            if (Number.isFinite(msg.x)) players[myId].x = msg.x;
-            if (Number.isFinite(msg.y)) players[myId].y = msg.y;
+            // Per utenti autenticati il nickname deve venire dalla sessione,
+            // non dal client, così non può essere cambiato arbitrariamente.
+            p.name = session.userName || msg.name || "Guest";
+            p.color = msg.color || "#38bdf8";
+
+            if (Number.isFinite(msg.x)) p.x = msg.x;
+            if (Number.isFinite(msg.y)) p.y = msg.y;
+
             broadcastPlayers();
         }
-
         else if (msg.type === "move") {
-            const nx = Number(msg.x), ny = Number(msg.y);
+            const nx = Number(msg.x);
+            const ny = Number(msg.y);
+
             if (!Number.isFinite(nx) || !Number.isFinite(ny)) return;
-            players[myId].x = nx;
-            players[myId].y = ny;
+
+            p.x = nx;
+            p.y = ny;
+
             broadcastPlayers();
         }
-
         else if (msg.type === "fetch_zone") {
             if (!msg.zoneKey) return;
+
             const zoneKey = String(msg.zoneKey);
             const { zx, zy } = parseZoneKey(zoneKey);
             const playable = isPlayableZone(zx, zy);
@@ -275,6 +548,7 @@ wss.on("connection", (ws) => {
             if (!worldState.zones[zoneKey]) {
                 worldState.zones[zoneKey] = { writes: {}, disc: false };
             }
+
             if (msg.discover) worldState.zones[zoneKey].disc = true;
 
             ws.send(JSON.stringify({
@@ -284,12 +558,15 @@ wss.on("connection", (ws) => {
                 writes: worldState.zones[zoneKey].writes || {}
             }));
         }
-
         else if (msg.type === "write") {
             if (!msg.zoneKey) return;
+
             const zoneKey = String(msg.zoneKey);
             const { zx, zy } = parseZoneKey(zoneKey);
-            const cx = Number(msg.cx), cy = Number(msg.cy), val = Number(msg.val);
+
+            const cx = Number(msg.cx);
+            const cy = Number(msg.cy);
+            const val = Number(msg.val);
 
             if (!isPlayableZone(zx, zy)) return;
             if (!(cx >= 0 && cx <= 2 && cy >= 0 && cy <= 2)) return;
@@ -297,17 +574,27 @@ wss.on("connection", (ws) => {
             if (!worldState.zones[zoneKey]) {
                 worldState.zones[zoneKey] = { writes: {}, disc: false };
             }
+
             worldState.zones[zoneKey].disc = true;
 
-            const writeData = { val, color: msg.color || null };
+            const writeData = {
+                val,
+                color: msg.color || null
+            };
+
             worldState.zones[zoneKey].writes[`${cx},${cy}`] = writeData;
 
-            // Broadcast a TUTTI i client connessi (mittente incluso, come nel client originale)
             wss.clients.forEach(client => {
                 if (client.readyState === 1) {
                     client.send(JSON.stringify({
                         type: "write",
-                        zoneKey, cx, cy, gx: msg.gx, gy: msg.gy, val, color: msg.color || null
+                        zoneKey,
+                        cx,
+                        cy,
+                        gx: msg.gx,
+                        gy: msg.gy,
+                        val,
+                        color: msg.color || null
                     }));
                 }
             });
@@ -315,8 +602,16 @@ wss.on("connection", (ws) => {
     });
 
     ws.on("close", () => {
-        delete players[myId];
+        delete players[connectionId];
         broadcastPlayers();
+    });
+});
+
+server.on("upgrade", (req, socket, head) => {
+    sessionMiddleware(req, {}, () => {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req);
+        });
     });
 });
 

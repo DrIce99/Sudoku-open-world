@@ -273,6 +273,11 @@ function applyRemoteWrite(msg) {
     const el = createNum(gx, gy, msg.val, "written_other");
     if (el) el.style.color = displayColor;
 
+    // Hook per i boss: numero corretto inserito da un altro giocatore
+    if (msg.val && window.bossManager?.onNumberPlaced) {
+        window.bossManager.onNumberPlaced(gx, gy, msg.val, true);
+    }
+
     if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
         highlight();
     }
@@ -567,6 +572,17 @@ function enterZone(zx, zy, dx = 0, dy = 0) {
     highlight();
 }
 
+function ensureZoneForMovement(zx, zy) {
+    if (!isPlayableZone(zx, zy)) return;
+
+    if (!doneWindows.has(zKey(zx, zy))) {
+        ensureWindow(zx, zy);
+    }
+
+    const z = getZone(zx, zy);
+    if (z) z.disc = true;
+}
+
 /* ========== GIOCATORE ========== */
 function updateCoords() {
     const elX = document.getElementById("coordX");
@@ -729,11 +745,20 @@ function pressDigit(d) {
         if (!isPlayableCell(nx, ny)) continue;
 
         if (cellShown(nx, ny) === d) {
+            const nz = zOf(nx, ny);
+
+            // Se il salto numerico cambia zona, genera il mondo come fa il movimento normale
+            if (nz.x !== curZone.x || nz.y !== curZone.y) {
+                if (follow) {
+                    enterZone(nz.x, nz.y);
+                } else if (!(window.bossManager && window.bossManager.isBossFightActive())) {
+                    ensureZoneForMovement(nz.x, nz.y);
+                }
+            }
+
             player.x = nx;
             player.y = ny;
             placePlayer();
-
-            const nz = zOf(nx, ny);
 
             if (nz.x !== curZone.x || nz.y !== curZone.y) {
                 curZone = nz;
@@ -742,6 +767,8 @@ function pressDigit(d) {
                 if (z) z.disc = true;
 
                 if (follow) recenter(true);
+
+                checkUnits();
             }
 
             return;
@@ -793,6 +820,11 @@ function doWrite(z, li, d) {
     gainXp(5);
     checkUnits();
     highlight();
+
+    // Hook per i boss: numero corretto inserito
+    if (window.bossManager?.onNumberPlaced) {
+        window.bossManager.onNumberPlaced(cx, cy, d, false);
+    }
 }
 function eraseCur() {
     const cx = player.x;
@@ -881,6 +913,11 @@ function checkUnits() {
             // Completata solo da numeri iniziali (givens): nessun premio XP
             if (!write) continue;
 
+            // Hook per i boss: riga / colonna / box 3x3 completata
+            if (window.bossManager?.onUnitCompleted) {
+                window.bossManager.onUnitCompleted(t, uk, cellsU);
+            }
+
             gainXp(20);
 
             toast(
@@ -949,8 +986,12 @@ function checkUnits() {
 
         if (hasPlayable && full) {
             doneWindows.add(windowKey);
-
             if (write) {
+                // Hook per i boss: finestra 9x9 completata
+                if (window.bossManager?.onWindowCompleted) {
+                    window.bossManager.onWindowCompleted(windowKey, winZone.x, winZone.y);
+                }
+
                 gainXp(150);
                 showWin();
             }
@@ -968,7 +1009,29 @@ function showWin() {
 document.getElementById("againBtn").onclick = () => document.getElementById("win").classList.add("hide");
 
 /* ========== VITA / XP ========== */
-let level = 1, xp = 0, xpNeed = 100, maxHp = 100, hp = 100;
+let level = 1, xp = 0, xpNeed = 100, maxHp = 100, hp = 100, baseAtk = 10;
+
+function xpNeedForLevel(l) {
+    return Math.round(100 * Math.pow(1.5, Math.max(1, l) - 1));
+}
+
+function maxHpForLevel(l) {
+    return Math.round(100 * Math.pow(1.05, Math.max(1, l) - 1));
+}
+
+function baseAtkForLevel(l) {
+    return 10 + Math.floor((Math.max(1, l) - 1) * 2);
+}
+
+function applyDerivedStats() {
+    xpNeed = xpNeedForLevel(level);
+    maxHp = maxHpForLevel(level);
+    baseAtk = baseAtkForLevel(level);
+
+    if (!Number.isFinite(hp) || hp <= 0 || hp > maxHp) {
+        hp = maxHp;
+    }
+}
 const hpFill = document.getElementById("hpFill"), xpFill = document.getElementById("xpFill"), lvlEl = document.getElementById("lvl");
 function updateBars() {
     hpFill.style.width = Math.max(0, hp / maxHp * 100) + "%";
@@ -979,13 +1042,28 @@ function updateBars() {
 }
 function gainXp(n) {
     xp += n;
-    if (AN) AN({ targets: "#xpFill", scaleY: [1.6, 1], duration: 260, easing: "easeOutQuad" });
+
+    if (AN) {
+        AN({
+            targets: "#xpFill",
+            scaleY: [1.6, 1],
+            duration: 260,
+            easing: "easeOutQuad"
+        });
+    }
+
     while (xp >= xpNeed) {
-        xp -= xpNeed; level++;
-        xpNeed = Math.round(100 * Math.pow(1.5, level - 1));
-        maxHp = Math.round(maxHp * 1.05); hp = maxHp;
+        xp -= xpNeed;
+        level++;
+
+        xpNeed = xpNeedForLevel(level);
+        maxHp = maxHpForLevel(level);
+        baseAtk = baseAtkForLevel(level);
+
+        hp = maxHp;
         levelUpFx();
     }
+
     updateBars();
 }
 function levelUpFx() {
@@ -1201,7 +1279,7 @@ function fit() {
     highlight();
 }
 window.addEventListener("resize", fit);
-async function newWorld() {
+async function newWorld(resetProgress = true) {
     curZone = { x: 0, y: 0 };
     winZone = { x: 0, y: 0 };
 
@@ -1245,11 +1323,16 @@ async function newWorld() {
 
     worldEl.querySelectorAll(".num,.notesAbs,.zone-refl").forEach(e => e.remove());
 
-    level = 1;
-    xp = 0;
-    xpNeed = 100;
-    maxHp = 100;
-    hp = 100;
+    if (resetProgress) {
+        level = 1;
+        xp = 0;
+    }
+
+    applyDerivedStats();
+
+    if (resetProgress) {
+        hp = maxHp;
+    }
     notesMode = false;
 
     follow = true;
@@ -1326,6 +1409,7 @@ async function newWorld() {
 let ws;
 let myId = null;
 let myName = "";
+let myPlayerId = null;
 // Colore con cui GLI ALTRI ti vedono (marker + numeri che scrivi).
 // Deve essere diverso dal blu del TUO player/numeri (var(--user) = #1d4ed8 in CSS),
 // altrimenti tutti i giocatori sembrano avere lo stesso colore agli occhi altrui.
@@ -1438,15 +1522,17 @@ function saveLocalPlayerStats() {
 window.addEventListener('beforeunload', () => {
     saveLocalPlayerStats();
 
-    if (playerStats.isGuest) return; // gli ospiti non hanno un profilo da salvare
+    if (playerStats.isGuest) return;
 
-    playerStats.name = myName;
-    playerStats.x = player.x;
-    playerStats.y = player.y;
-    playerStats.hp = hp;
-    playerStats.maxHp = maxHp;
+    const payload = JSON.stringify({
+        level,
+        xp,
+        x: player.x,
+        y: player.y,
+        deaths: playerStats.deaths,
+        stats: playerStats.stats
+    });
 
-    const payload = JSON.stringify(playerStats);
     const blob = new Blob([payload], { type: 'application/json' });
     navigator.sendBeacon('/api/save-stats', blob);
 });
@@ -1492,7 +1578,9 @@ async function initGame() {
         }
 
         const data = resData.data || {};
+
         myName = data.username || data.name || "Giocatore";
+        myPlayerId = data.playerId || null;
 
         const usernameHud = document.getElementById("hud-username");
         if (usernameHud) usernameHud.innerText = myName;
@@ -1502,33 +1590,35 @@ async function initGame() {
             return;
         }
 
-        createPlayerIdBadge(myName);
+        createPlayerIdBadge(myPlayerId || myName);
 
         playerStats = { ...playerStats, ...data };
-        level = data.level || 1;
-        xp = data.xp || 0;
-        hp = data.hp || 100;
-        maxHp = data.maxHp || 100;
+
+        // Applica progresso reale prima di newWorld(false)
+        level = Math.max(1, Math.floor(Number(data.level) || 1));
+        xp = Math.max(0, Math.floor(Number(data.xp) || 0));
+
+        applyDerivedStats();
+        hp = maxHp;
 
         const pos = data.currentPosition || {};
         const savedX = Number.isFinite(pos.x) ? pos.x : null;
         const savedY = Number.isFinite(pos.y) ? pos.y : null;
 
         updateBars();
-
         fit();
-        await newWorld();
+
+        await newWorld(false);
         worldInitialized = true;
 
-        // Se il giocatore ha coordinate salvate, le imposta e genera le zone circostanti
+        updateBars();
+
         if (savedX !== null && savedY !== null) {
             player.x = savedX;
             player.y = savedY;
             curZone = zOf(player.x, player.y);
 
-            // Forza la generazione locale delle zone attorno alla posizione salvata
             enterZone(curZone.x, curZone.y);
-
             placePlayer();
             recenter(false);
         }
@@ -1549,6 +1639,9 @@ function startOfflineMode(data) {
     // Carica i dati salvati in localStorage (progressi offline locali)
     loadLocalPlayerStats();
     playerStats.isGuest = true; // forzato dopo il merge: un ospite resta un ospite
+
+    myPlayerId = data?.playerId || myPlayerId || `Guest#${Math.floor(1000 + Math.random() * 9000)}`;
+    createPlayerIdBadge(myPlayerId);
 
     // Se esiste una connessione WS aperta, la chiude in modo pulito
     if (ws) {
@@ -1579,10 +1672,12 @@ function connectWebSocket() {
             ws.send(JSON.stringify({
                 type: "join",
                 name: myName,
+                playerId: myPlayerId,
                 color: myColor,
                 x: player.x,
                 y: player.y
             }));
+
             lastSentX = player.x;
             lastSentY = player.y;
 
@@ -1600,8 +1695,18 @@ function connectWebSocket() {
 
         ws.onmessage = (event) => {
             const msg = JSON.parse(event.data);
-            if (msg.type === "init") myId = msg.myId;
-            else if (msg.type === "players") updateOtherPlayers(msg.data);
+
+            if (msg.type === "init") {
+                myId = msg.myId;
+
+                if (msg.myPlayerId) {
+                    myPlayerId = msg.myPlayerId;
+                    createPlayerIdBadge(myPlayerId);
+                }
+            }
+            else if (msg.type === "players") {
+                updateOtherPlayers(msg.data);
+            }
             else if (msg.type === "write") {
                 applyRemoteWrite(msg);
                 if (mapMode) drawMinimap();
@@ -1636,18 +1741,15 @@ function createPlayerIdBadge(idText) {
 function savePlayerData() {
     if (playerStats.isGuest) return;
 
-    playerStats.name = myName;
-    playerStats.x = player.x;
-    playerStats.y = player.y;
-    playerStats.level = level;
-    playerStats.xp = xp;
-    playerStats.hp = hp;
-    playerStats.maxHp = maxHp;
-
     fetch("/api/save-progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(playerStats)
+        body: JSON.stringify({
+            x: player.x,
+            y: player.y,
+            level,
+            xp
+        })
     }).catch((err) => console.warn("Salvataggio progressi fallito:", err));
 
     saveLocalPlayerStats();

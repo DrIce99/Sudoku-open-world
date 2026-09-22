@@ -47,6 +47,11 @@ class BaseBoss {
         return zx >= this.bx && zx < this.bx + 3 && zy >= this.by && zy < this.by + 3;
     }
 
+    containsCells(cells) {
+        if (!Array.isArray(cells) || !cells.length) return false;
+        return cells.every(c => Array.isArray(c) && this.containsCell(c[0], c[1]));
+    }
+
     update(deltaTime) {
         // Da implementare nelle sottoclassi
     }
@@ -80,6 +85,9 @@ class SudokuHpBoss extends BaseBoss {
         this.attackTimer = 0;
         this.attackInterval = 7000; // Attacca ogni 7 secondi
         this.isAttacking = false;
+
+        this.unitBonusDamage = 120;
+        this.windowBonusDamage = 350;
     }
 
     update(deltaTime) {
@@ -312,6 +320,23 @@ class SudokuHpBoss extends BaseBoss {
             }
         }
     }
+
+    onUnitCompleted(type, uk, cells) {
+        if (!this.active) return;
+        if (!this.containsCells(cells)) return;
+
+        // Danno extra quando viene completata una riga / colonna / box 3x3 nella sua area
+        this.takeDamage(this.unitBonusDamage || 120);
+    }
+
+    onWindowCompleted(windowKey, zx, zy) {
+        if (!this.active) return;
+
+        // La finestra 9x9 del boss è centrata su (bx + 1, by + 1)
+        if (zx === this.bx + 1 && zy === this.by + 1) {
+            this.takeDamage(this.windowBonusDamage || 350);
+        }
+    }
 }
 
 /* ============================================================
@@ -387,8 +412,13 @@ class BossManager {
         }
     }
 
-    spawnBoss(type = "sudoku_hp", bx = null, by = null) {
+    spawnBoss(type = null, bx = null, by = null) {
         if (this.bosses.size >= this.maxBosses) return null;
+
+        // Probabilità condivisa: 50% sudoku_hp, 50% survival_trial
+        if (!type) {
+            type = Math.random() < 0.5 ? "sudoku_hp" : "survival_trial";
+        }
 
         // Se le coordinate non sono fornite, trova coordinate casuali valide
         if (bx === null || by === null) {
@@ -396,24 +426,57 @@ class BossManager {
             if (!coords) return null;
             bx = coords.bx;
             by = coords.by;
+        } else if (!this.isSpawnAreaValid(bx, by)) {
+            return null;
         }
 
         const id = "boss_" + Date.now() + "_" + Math.floor(Math.random() * 1000);
+
         let boss = null;
 
         if (type === "sudoku_hp") {
             boss = new SudokuHpBoss(id, bx, by);
+        } else if (type === "survival_trial") {
+            boss = new SurvivalTrialBoss(id, bx, by);
+        } else {
+            return null;
         }
 
         if (boss) {
             this.bosses.set(id, boss);
-            toast("Un nuovo Boss è apparso nel mondo!", "bad");
+            toast(`Un nuovo Boss è apparso: ${boss.name}!`, "bad");
         }
 
         return boss;
     }
 
+    isSpawnAreaValid(bx, by) {
+        // Tutte e 9 le zone devono essere giocabili
+        for (let dy = 0; dy < 3; dy++) {
+            for (let dx = 0; dx < 3; dx++) {
+                if (!isPlayableZone(bx + dx, by + dy)) {
+                    return false;
+                }
+            }
+        }
+
+        // Nessun blocco deve sovrapporsi a boss esistenti
+        for (const existingBoss of this.bosses.values()) {
+            for (let dy = 0; dy < 3; dy++) {
+                for (let dx = 0; dx < 3; dx++) {
+                    if (existingBoss.containsBlock(bx + dx, by + dy)) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        return true;
+    }
+
     findValidSpawnCoords() {
+        if (typeof player === "undefined") return null;
+
         const playerZone = zOf(player.x, player.y);
         const maxAttempts = 50;
 
@@ -421,40 +484,16 @@ class BossManager {
             // Genera offset casuale tra 5 e 20 blocchi dal giocatore
             const dist = 5 + Math.floor(Math.random() * 15);
             const angle = Math.random() * Math.PI * 2;
+
             const targetBx = Math.floor(playerZone.x + Math.cos(angle) * dist);
             const targetBy = Math.floor(playerZone.y + Math.sin(angle) * dist);
 
-            // 1. Requisito: Distanza minima di 5 blocchi dallo spawn/giocatore
+            // 1. Requisito: distanza minima
             const blockDist = Math.hypot(targetBx - playerZone.x, targetBy - playerZone.y);
             if (blockDist < 5) continue;
 
-            // 2. Requisito: Il boss deve prendere 9 blocchi NON vuoti (giocabili)
-            let valid9Blocks = true;
-            for (let dy = 0; dy < 3; dy++) {
-                for (let dx = 0; dx < 3; dx++) {
-                    if (!isPlayableZone(targetBx + dx, targetBy + dy)) {
-                        valid9Blocks = false;
-                        break;
-                    }
-                }
-                if (!valid9Blocks) break;
-            }
-            if (!valid9Blocks) continue;
-
-            // 3. Requisito: Nessuna sovrapposizione con altri boss
-            let overlap = false;
-            for (const existingBoss of this.bosses.values()) {
-                for (let dy = 0; dy < 3; dy++) {
-                    for (let dx = 0; dx < 3; dx++) {
-                        if (existingBoss.containsBlock(targetBx + dx, targetBy + dy)) {
-                            overlap = true;
-                            break;
-                        }
-                    }
-                    if (overlap) break;
-                }
-            }
-            if (overlap) continue;
+            // 2. Requisito: area valida e non sovrapposta
+            if (!this.isSpawnAreaValid(targetBx, targetBy)) continue;
 
             return { bx: targetBx, by: targetBy };
         }
@@ -467,7 +506,7 @@ class BossManager {
         this.spawnTimer += deltaTime;
         if (this.spawnTimer >= this.spawnInterval) {
             this.spawnTimer = 0;
-            this.spawnBoss("sudoku_hp");
+            this.spawnBoss(); // 50% sudoku_hp, 50% survival_trial
         }
 
         let playerInsideAnyBoss = null;
@@ -518,19 +557,18 @@ class BossManager {
             if (this.forcedCameraBoss !== currentBoss) {
                 this.forcedCameraBoss = currentBoss;
 
-                // 1) FORZA LA GENERAZIONE DI TUTTI I 9 BLOCCHI DEL BOSS
-                //    Appena si entra nell'area, genera subito tutte le zone 3x3
-                //    dell'area 9x9 del boss, altrimenti restano senza numeri.
+                // Genera subito tutti i 9 blocchi 3x3 dell'area boss
                 for (let dy = 0; dy < 3; dy++) {
                     for (let dx = 0; dx < 3; dx++) {
                         const zx = currentBoss.bx + dx;
                         const zy = currentBoss.by + dy;
+
                         const z = genSingleZone(zx, zy);
-                        if (z) z.disc = true; // segna come scoperte (mappa)
+                        if (z) z.disc = true;
                     }
                 }
 
-                // 2) BLOCCO TELECAMERA / MOVIMENTO sull'area 9x9 del boss
+                // Blocca movimento e camera sull'area 9x9 del boss
                 follow = false;
                 lockRect = {
                     x0: currentBoss.bx * 3,
@@ -539,38 +577,63 @@ class BossManager {
                     y1: currentBoss.by * 3 + 8
                 };
 
-                // 3) NASCONDI LA VISTA DI BLOCCO FINTA (activeBox blu):
-                //    durante la bossfight l'unico confine visivo valido
-                //    è il bordo rosso dell'area boss.
+                // NON nascondere activeBox: deve restare visibile per mostrare la griglia
                 activeBox.classList.add("locked");
-                activeBox.style.display = "none";
+                activeBox.style.display = "";
+                activeBox.style.pointerEvents = "none";
+
+                // Forza la griglia attiva sull'area del boss
+                setActiveBlock(currentBoss.bx, currentBoss.by, true);
+
                 document.getElementById("lockBadge").style.display = "block";
 
-                // 4) Centra la telecamera sull'area del boss
-                camTo((currentBoss.bx + 1.5) * 3, (currentBoss.by + 1.5) * 3);
+                // Forza la finestra logica 9x9 sull'area del boss
+                if (typeof winZone !== "undefined") {
+                    winZone = {
+                        x: currentBoss.bx + 1,
+                        y: currentBoss.by + 1
+                    };
+                }
 
-                // Aggiorna evidenziazioni e controllo unità dopo la generazione
+                camTo(
+                    (currentBoss.bx + 1.5) * 3,
+                    (currentBoss.by + 1.5) * 3
+                );
+
                 highlight();
                 checkUnits();
             }
         } else if (this.forcedCameraBoss) {
-            // Il player è uscito dall'area del boss -> sblocca tutto
             this.forcedCameraBoss = null;
+
             follow = true;
             lockRect = null;
+
             activeBox.classList.remove("locked");
-            activeBox.style.display = ""; // ripristina la vista normale
+            activeBox.style.display = "";
+            activeBox.style.pointerEvents = "";
+
             document.getElementById("lockBadge").style.display = "none";
+
             recenter(true);
         }
     }
 
     updateHUD(currentBoss) {
         const hudEl = document.getElementById("boss-hud-container");
+
         if (currentBoss) {
             hudEl.style.display = "flex";
-            document.getElementById("boss-hud-title").textContent = currentBoss.name;
-            const fillPct = (currentBoss.hp / currentBoss.maxHp) * 100;
+
+            const titleEl = document.getElementById("boss-hud-title");
+
+            if (currentBoss.type === "survival_trial") {
+                titleEl.textContent = `${currentBoss.name} · ${Math.ceil(currentBoss.timeLeft)}s`;
+            } else {
+                titleEl.textContent = currentBoss.name;
+            }
+
+            const fillPct = Math.max(0, (currentBoss.hp / currentBoss.maxHp) * 100);
             document.getElementById("boss-hp-fill").style.width = fillPct + "%";
         } else {
             hudEl.style.display = "none";
@@ -653,7 +716,374 @@ class BossManager {
 
         return false;
     }
+
+    onNumberPlaced(cx, cy, value, remote = false) {
+        this.bosses.forEach(boss => {
+            if (boss.active && boss.onNumberPlaced) {
+                boss.onNumberPlaced(cx, cy, value, remote);
+            }
+        });
+    }
+
+    onUnitCompleted(type, uk, cells) {
+        this.bosses.forEach(boss => {
+            if (boss.active && boss.onUnitCompleted) {
+                boss.onUnitCompleted(type, uk, cells);
+            }
+        });
+    }
+
+    onWindowCompleted(windowKey, zx, zy) {
+        this.bosses.forEach(boss => {
+            if (boss.active && boss.onWindowCompleted) {
+                boss.onWindowCompleted(windowKey, zx, zy);
+            }
+        });
+    }
+
+    onPlayerDeath() {
+        this.bosses.forEach(boss => {
+            if (boss.type !== "survival_trial") return;
+            if (!boss.active || !boss.fail) return;
+
+            const inTrialArea =
+                typeof player !== "undefined" &&
+                boss.containsCell(player.x, player.y);
+
+            if (inTrialArea || this.forcedCameraBoss === boss) {
+                boss.fail();
+            }
+        });
+    }
+}
+
+/* ============================================================
+TIPO BOSS 2: SurvivalTrialBoss
+============================================================ */
+class SurvivalTrialBoss extends BaseBoss {
+    constructor(id, bx, by) {
+        super(id, bx, by, 1000);
+
+        this.type = "survival_trial";
+        this.name = "Survival Trial";
+
+        // Durata base della prova
+        this.duration = 180;
+        this.timeLeft = this.duration;
+
+        // La barra vita rappresenta il tempo residuo normalizzato
+        this.maxHp = 1000;
+        this.hp = this.maxHp;
+
+        // Attacca più spesso del boss normale
+        this.attackTimer = 0;
+        this.attackInterval = 4200;
+        this.telegraphTime = 1400;
+        this.isAttacking = false;
+        this.failed = false;
+
+        // Bilanciamento riduzione tempo
+        this.numberTimeReduction = 1.0;
+        this.unitTimeReduction = 6.0;
+        this.windowTimeReduction = 20.0;
+
+        // Bonus per classi offensive dei numeri
+        this.offensiveMultiplier = 1.6;
+
+        // Fa più danno del boss normale
+        this.attackDamageMultiplier = 0.35;
+    }
+
+    update(deltaTime) {
+        if (!this.active || this.failed) return;
+
+        const dtSec = deltaTime / 1000;
+
+        this.timeLeft -= dtSec;
+
+        this.hp = Math.max(
+            0,
+            Math.round((this.timeLeft / this.duration) * this.maxHp)
+        );
+
+        if (this.timeLeft <= 0) {
+            this.onDeath();
+            return;
+        }
+
+        this.attackTimer += deltaTime;
+
+        if (this.attackTimer >= this.attackInterval && !this.isAttacking) {
+            this.attackTimer = 0;
+            this.executeRandomAttack();
+        }
+    }
+
+    takeDamage(amount) {
+        if (!Number.isFinite(amount)) return;
+        // Il danno esterno può essere convertito in riduzione del timer
+        this.reduceTime((amount / this.maxHp) * this.duration);
+    }
+
+    heal(amount) {
+        if (!Number.isFinite(amount)) return;
+        // Eventuale cura = recupero di tempo
+        this.reduceTime(-(amount / this.maxHp) * this.duration);
+    }
+
+    reduceTime(seconds) {
+        if (!this.active || this.failed) return;
+        if (!Number.isFinite(seconds) || seconds === 0) return;
+
+        this.timeLeft = Math.min(this.duration, Math.max(0, this.timeLeft - seconds));
+        this.hp = Math.max(0, Math.round((this.timeLeft / this.duration) * this.maxHp));
+
+        if (this.timeLeft <= 0) {
+            this.onDeath();
+        }
+    }
+
+    isOffensiveNumber(value) {
+        // Hook globale personalizzabile
+        if (typeof window.isOffensiveNumber === "function") {
+            return !!window.isOffensiveNumber(value);
+        }
+
+        // Configurazione globale semplice
+        if (Array.isArray(window.OFFENSIVE_NUMBERS) && window.OFFENSIVE_NUMBERS.includes(value)) {
+            return true;
+        }
+
+        // Configurazione nel profilo giocatore
+        const future = window.playerStats?.futureFeatures || {};
+        if (Array.isArray(future.offensiveNumbers) && future.offensiveNumbers.includes(value)) {
+            return true;
+        }
+
+        // Se il giocatore ha una classe offensiva generica
+        return !!future.offensiveClass;
+    }
+
+    onNumberPlaced(cx, cy, value, remote = false) {
+        if (!this.active || this.failed) return;
+        if (!this.containsCell(cx, cy)) return;
+
+        let amount = this.numberTimeReduction;
+
+        // Le classi offensive dei numeri riducono di più il tempo
+        if (this.isOffensiveNumber(value)) {
+            amount *= this.offensiveMultiplier;
+        }
+
+        this.reduceTime(amount);
+    }
+
+    onUnitCompleted(type, uk, cells) {
+        if (!this.active || this.failed) return;
+        if (!this.containsCells(cells)) return;
+
+        // Completamento riga / colonna / box 3x3 toglie tempo extra
+        this.reduceTime(this.unitTimeReduction);
+    }
+
+    onWindowCompleted(windowKey, zx, zy) {
+        if (!this.active || this.failed) return;
+
+        // La finestra 9x9 del boss è centrata su (bx + 1, by + 1)
+        if (zx === this.bx + 1 && zy === this.by + 1) {
+            this.reduceTime(this.windowTimeReduction);
+        }
+    }
+
+    fail() {
+        if (!this.active || this.failed) return;
+
+        this.failed = true;
+        this.active = false;
+        this.destroyOutline();
+
+        toast("Survival Trial fallita!", "bad");
+    }
+
+    onDeath() {
+        if (!this.active || this.failed) return;
+
+        this.active = false;
+        this.destroyOutline();
+
+        toast("SURVIVAL TRIAL SUPERATA! (+500 XP)", "gold");
+        gainXp(500);
+    }
+
+    executeRandomAttack() {
+        if (!this.active || this.failed || this.isAttacking) return;
+
+        this.isAttacking = true;
+
+        const patternType = Math.random() < 0.5 ? "line" : "drunkard";
+        const targetCells = patternType === "line"
+            ? this.generateLineAttackPattern()
+            : this.generateDrunkardWalkPattern();
+
+        // Telegraph visivo
+        const warnElements = [];
+        targetCells.forEach(cell => {
+            const el = document.createElement("div");
+            el.className = "boss-attack-cell";
+            el.style.left = (cell.x * CELL) + "px";
+            el.style.top = (cell.y * CELL) + "px";
+            el.style.width = CELL + "px";
+            el.style.height = CELL + "px";
+            worldEl.appendChild(el);
+            warnElements.push(el);
+        });
+
+        setTimeout(() => {
+            warnElements.forEach(el => el.remove());
+
+            if (!this.active || this.failed) {
+                this.isAttacking = false;
+                return;
+            }
+
+            if (
+                typeof player !== "undefined" &&
+                targetCells.some(c => c.x === player.x && c.y === player.y)
+            ) {
+                this.hitPlayerByAttack();
+            }
+
+            this.isAttacking = false;
+        }, this.telegraphTime);
+    }
+
+    generateLineAttackPattern() {
+        const startX = this.bx * 3;
+        const startY = this.by * 3;
+
+        const isRow = Math.random() < 0.5;
+        const index = Math.floor(Math.random() * 9);
+        const cells = [];
+
+        for (let i = 0; i < 9; i++) {
+            cells.push({
+                x: isRow ? startX + i : startX + index,
+                y: isRow ? startY + index : startY + i
+            });
+        }
+
+        return cells;
+    }
+
+    generateDrunkardWalkPattern() {
+        const startX = this.bx * 3;
+        const startY = this.by * 3;
+
+        const allCells = [];
+
+        // Più aree rispetto al boss normale
+        const areas = 3;
+
+        for (let area = 0; area < areas; area++) {
+            let cx = Math.floor(Math.random() * 9);
+            let cy = Math.floor(Math.random() * 9);
+
+            const visited = new Set();
+            const areaCells = [];
+
+            while (areaCells.length < 6) {
+                const key = `${cx},${cy}`;
+                if (!visited.has(key)) {
+                    visited.add(key);
+                    areaCells.push({ x: startX + cx, y: startY + cy });
+                }
+
+                const dirs = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+                const d = dirs[Math.floor(Math.random() * dirs.length)];
+
+                cx = Math.max(0, Math.min(8, cx + d[0]));
+                cy = Math.max(0, Math.min(8, cy + d[1]));
+            }
+
+            allCells.push(...areaCells);
+        }
+
+        return allCells;
+    }
+
+    hitPlayerByAttack() {
+        const dmg = Math.max(12, Math.round(maxHp * this.attackDamageMultiplier));
+        hp -= dmg;
+
+        toast(`Colpito dalla Survival Trial! -${dmg} HP`, "bad");
+
+        const v = document.getElementById("vignette");
+        const stageEl = document.getElementById("stage");
+        const hpFillEl = document.getElementById("hpFill");
+
+        if (typeof AN !== "undefined" && AN) {
+            if (v) {
+                AN({
+                    targets: v,
+                    keyframes: [
+                        { opacity: 1 },
+                        { opacity: 0, duration: 500 }
+                    ],
+                    easing: "easeOutQuad"
+                });
+            }
+
+            if (stageEl) {
+                AN({
+                    targets: stageEl,
+                    translateX: [0, -10, 10, -6, 6, 0],
+                    duration: 340
+                });
+            }
+
+            if (hpFillEl) {
+                AN({
+                    targets: hpFillEl,
+                    keyframes: [
+                        { backgroundColor: "#ffffff" },
+                        { backgroundColor: "#ef4444" }
+                    ],
+                    duration: 500
+                });
+            }
+        } else {
+            if (v) {
+                v.style.opacity = 1;
+                setTimeout(() => v.style.opacity = 0, 350);
+            }
+        }
+
+        if (hp <= 0) {
+            respawn();
+        }
+
+        updateBars();
+    }
 }
 
 // Istanza Globale
 window.bossManager = new BossManager();
+
+// Intercetta la morte del giocatore per fallire eventuali Survival Trial attive
+(function () {
+    if (typeof respawn === "function") {
+        const baseRespawn = respawn;
+
+        respawn = function () {
+            try {
+                if (window.bossManager?.onPlayerDeath) {
+                    window.bossManager.onPlayerDeath();
+                }
+            } catch (e) {
+                console.warn("Errore in onPlayerDeath:", e);
+            }
+
+            return baseRespawn.apply(this, arguments);
+        };
+    }
+})();

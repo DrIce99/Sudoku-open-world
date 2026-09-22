@@ -19,20 +19,19 @@ export const auth = getAuth();
 export async function getPlayerData(userId) {
     const userRef = db.collection("users").doc(userId);
     const doc = await userRef.get();
-    
+
     if (doc.exists) {
         return doc.data();
     }
-    
+
     // Dati di default per un nuovo giocatore
     const defaultData = {
         name: "",
-        username: null,
+        username: null,       // nickname scelto dall'utente, non modificabile
+        playerId: null,       // ID pubblico unico, tipo "Mario#4821"
         created_at: FieldValue.serverTimestamp(),
         level: 1,
         xp: 0,
-        hp: 100,
-        maxHp: 100,
         stats: {
             completedSudokus: 0,
             placedNumbers: 0,
@@ -41,7 +40,7 @@ export async function getPlayerData(userId) {
         inventory: [],
         currentPosition: { x: 0, y: 0 }
     };
-    
+
     await userRef.set(defaultData);
     return defaultData;
 }

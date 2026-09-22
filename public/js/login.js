@@ -13,7 +13,33 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const provider = new firebase.auth.GoogleAuthProvider();
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+
+    async function checkLoginState() {
+        try {
+            const res = await fetch("/api/login-state");
+            const state = await res.json();
+
+            if (state.authenticated && state.needUsername) {
+                document.getElementById("login-section").classList.add("hidden");
+                document.getElementById("username-section").classList.remove("hidden");
+                return;
+            }
+
+            if (state.authenticated && !state.needUsername) {
+                if (state.isGuest) {
+                    window.location.href = "/game";
+                } else {
+                    window.location.href = "/";
+                }
+            }
+        } catch (err) {
+            console.warn("Impossibile controllare lo stato di login:", err);
+        }
+    }
+
+    await checkLoginState();
+
     document.getElementById("google-login-btn").addEventListener("click", async () => {
         try {
             const result = await firebase.auth().signInWithPopup(provider);
@@ -40,24 +66,27 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("save-username-btn").addEventListener("click", async () => {
         const username = document.getElementById("username-input").value;
+
         const res = await fetch("/api/set-username", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username })
         });
+
         const data = await res.json();
+
         if (data.status === "success") {
             window.location.href = "/";
         } else {
-            alert(data.message);
+            alert(data.message || "Errore durante il salvataggio del nickname");
         }
     });
-
 
     document.getElementById("guest-login-btn")?.addEventListener("click", async () => {
         try {
             const res = await fetch("/api/guest-login", { method: "POST" });
             const data = await res.json();
+
             if (data.status === "success") {
                 window.location.href = "/game";
             }
