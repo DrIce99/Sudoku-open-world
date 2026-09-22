@@ -613,8 +613,7 @@ class BossManager {
             return;
         }
 
-        // Altrimenti aggancia la freccia ai bordi dello schermo,
-        // come fai nel beacon di dungeon/villaggi
+        // Altrimenti aggancia la freccia ai bordi dello schermo
         const edgeX = Math.max(margin, Math.min(cw - margin, sx));
         const edgeY = Math.max(margin, Math.min(ch - margin, sy));
 
