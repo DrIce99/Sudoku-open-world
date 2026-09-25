@@ -262,6 +262,19 @@ function applyRemoteWrite(msg) {
     const li = zLocal(gx, gy);
     const m = 1 << li;
 
+    // Rimozione remota (es. attacco boss)
+    if (Number(msg.val) === 0) {
+        if (z.wr & m) {
+            z.wr &= ~m;
+            removeNum(gx, gy);
+
+            if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
+                highlight();
+            }
+        }
+        return;
+    }
+
     // Non sovrascrivere numeri iniziali (givens) o già scritti
     if ((z.rev & m) || (z.wr & m)) return;
 
@@ -1436,15 +1449,22 @@ const originalDoWrite = doWrite;
 doWrite = function (z, li, d) {
     if (!isPlayableCell(player.x, player.y) || z.empty) return;
 
+    const cx = player.x;
+    const cy = player.y;
+
     originalDoWrite(z, li, d);
 
-    playerStats.numbersWritten++;
+    // Hook per i boss: numero corretto inserito
+    if (window.bossManager?.onNumberPlaced) {
+        window.bossManager.onNumberPlaced(cx, cy, d, false);
+    }
+
+    playerStats.stats.placedNumbers++;
     saveLocalPlayerStats();
 
     if (ws && ws.readyState === 1) {
         const gx = player.x;
         const gy = player.y;
-
         const lx = mod(gx, 3);
         const ly = mod(gy, 3);
 

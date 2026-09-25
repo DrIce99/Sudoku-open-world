@@ -519,10 +519,19 @@ class BossManager {
                 return;
             }
 
+            const isPlayerInside =
+                typeof player !== "undefined" &&
+                boss.containsCell(player.x, player.y);
+
+            // Comunica al boss se il player è entrato/uscito dall'area
+            if (typeof boss.setPlayerInside === "function") {
+                boss.setPlayerInside(isPlayerInside);
+            }
+
             boss.update(deltaTime);
 
             // Controlla se il player è dentro l'area del boss
-            if (boss.containsCell(player.x, player.y)) {
+            if (isPlayerInside) {
                 playerInsideAnyBoss = boss;
             }
 
@@ -755,6 +764,14 @@ class BossManager {
             }
         });
     }
+
+    onNumberPlaced(cx, cy, value, remote = false) {
+        this.bosses.forEach(boss => {
+            if (boss.active && typeof boss.onNumberPlaced === "function") {
+                boss.onNumberPlaced(cx, cy, value, remote);
+            }
+        });
+    }
 }
 
 /* ============================================================
@@ -770,6 +787,9 @@ class SurvivalTrialBoss extends BaseBoss {
         // Durata base della prova
         this.duration = 180;
         this.timeLeft = this.duration;
+
+        this.started = false;
+        this.playerInside = false;
 
         // La barra vita rappresenta il tempo residuo normalizzato
         this.maxHp = 1000;
@@ -796,6 +816,9 @@ class SurvivalTrialBoss extends BaseBoss {
 
     update(deltaTime) {
         if (!this.active || this.failed) return;
+
+        // Il timer non parte finché il player non entra nell'area
+        if (!this.started) return;
 
         const dtSec = deltaTime / 1000;
 
@@ -833,10 +856,18 @@ class SurvivalTrialBoss extends BaseBoss {
 
     reduceTime(seconds) {
         if (!this.active || this.failed) return;
-        if (!Number.isFinite(seconds) || seconds === 0) return;
+        if (!Number.isFinite(seconds) || seconds <= 0) return;
 
-        this.timeLeft = Math.min(this.duration, Math.max(0, this.timeLeft - seconds));
-        this.hp = Math.max(0, Math.round((this.timeLeft / this.duration) * this.maxHp));
+        this.timeLeft = Math.max(0, this.timeLeft - seconds);
+
+        const denom = Number.isFinite(this.duration) && this.duration > 0
+            ? this.duration
+            : 1;
+
+        this.hp = Math.max(
+            0,
+            Math.round((this.timeLeft / denom) * this.maxHp)
+        );
 
         if (this.timeLeft <= 0) {
             this.onDeath();
@@ -866,13 +897,28 @@ class SurvivalTrialBoss extends BaseBoss {
 
     onNumberPlaced(cx, cy, value, remote = false) {
         if (!this.active || this.failed) return;
+
+        // Riduce il tempo solo se il numero è stato inserito dentro l'area del boss
         if (!this.containsCell(cx, cy)) return;
 
-        let amount = this.numberTimeReduction;
+        // Se il trial non era ancora partito, lo facciamo partire
+        // perché il player è chiaramente dentro l'area e sta interagendo.
+        if (!this.started) {
+            this.started = true;
+            this.playerInside = true;
+        }
 
-        // Le classi offensive dei numeri riducono di più il tempo
-        if (this.isOffensiveNumber(value)) {
-            amount *= this.offensiveMultiplier;
+        let amount = Number.isFinite(this.numberTimeReduction)
+            ? this.numberTimeReduction
+            : 1.0;
+
+        // Eventuale bonus classi offensive
+        if (typeof this.isOffensiveNumber === "function" && this.isOffensiveNumber(value)) {
+            const mult = Number.isFinite(this.offensiveMultiplier)
+                ? this.offensiveMultiplier
+                : 1.5;
+
+            amount *= mult;
         }
 
         this.reduceTime(amount);
@@ -953,8 +999,13 @@ class SurvivalTrialBoss extends BaseBoss {
                 this.hitPlayerByAttack();
             }
 
+            // Rimuove i numeri scritti nelle celle attaccate
+            targetCells.forEach(cell => {
+                this.strikeCell(cell.x, cell.y);
+            });
+
             this.isAttacking = false;
-        }, this.telegraphTime);
+        }, this.telegraphTime || 1400);
     }
 
     generateLineAttackPattern() {
@@ -1063,6 +1114,57 @@ class SurvivalTrialBoss extends BaseBoss {
         }
 
         updateBars();
+    }
+
+    setPlayerInside(inside) {
+        if (!this.active || this.failed) return;
+
+        if (inside && !this.playerInside) {
+            this.playerInside = true;
+
+            if (!this.started) {
+                this.started = true;
+                toast("Survival Trial iniziato!", "bad");
+            }
+        } else if (!inside && this.playerInside) {
+            this.playerInside = false;
+        }
+    }
+
+    strikeCell(cx, cy) {
+        // Protezione assoluta dei numeri immortali
+        if (isImmortalCell(cx, cy)) return;
+
+        const zPos = zOf(cx, cy);
+        const z = getZone(zPos.x, zPos.y);
+
+        if (!z || z.empty) return;
+
+        const li = zLocal(cx, cy);
+        const mask = 1 << li;
+
+        // Non rimuovere i numeri iniziali / given
+        if (z.rev & mask) return;
+
+        // Rimuove solo numeri scritti manualmente o da altri player
+        if (z.wr & mask) {
+            z.wr &= ~mask;
+            removeNum(cx, cy);
+
+            // Notifica WebSocket se attivo
+            if (ws && ws.readyState === 1) {
+                ws.send(JSON.stringify({
+                    type: "write",
+                    zoneKey: zKey(zPos.x, zPos.y),
+                    cx: mod(cx, 3),
+                    cy: mod(cy, 3),
+                    gx: cx,
+                    gy: cy,
+                    val: 0,
+                    color: null
+                }));
+            }
+        }
     }
 }
 

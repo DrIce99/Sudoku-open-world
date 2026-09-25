@@ -577,12 +577,16 @@ wss.on("connection", (ws, req) => {
 
             worldState.zones[zoneKey].disc = true;
 
-            const writeData = {
-                val,
-                color: msg.color || null
-            };
+            const writeKey = `${cx},${cy}`;
 
-            worldState.zones[zoneKey].writes[`${cx},${cy}`] = writeData;
+            if (val === 0) {
+                delete worldState.zones[zoneKey].writes[writeKey];
+            } else {
+                worldState.zones[zoneKey].writes[writeKey] = {
+                    val,
+                    color: msg.color || null
+                };
+            }
 
             wss.clients.forEach(client => {
                 if (client.readyState === 1) {
