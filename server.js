@@ -479,6 +479,16 @@ function broadcastPlayers() {
     broadcast({ type: "players", data: playersData });
 }
 
+// Heartbeat: una connessione che non risponde (rete caduta, scheda congelata)
+// viene terminata, così il suo giocatore sparisce dal mondo.
+setInterval(() => {
+    wss.clients.forEach(client => {
+        if (!client.isAlive) return client.terminate();
+        client.isAlive = false;
+        client.ping();
+    });
+}, 30000);
+
 wss.on("connection", (ws, req) => {
     const connectionId = randomUUID();
     const session = req.session || {};
@@ -487,7 +497,20 @@ wss.on("connection", (ws, req) => {
     const playerId = session.playerId || `Guest#${randomDiscriminator()}`;
     const displayName = session.userName || "Guest";
 
+    // Un account = una connessione: se lo stesso utente entra da un'altra scheda
+    // (o la vecchia connessione è rimasta appesa) quella precedente viene chiusa,
+    // così non restano giocatori "fantasma" fermi nel mondo.
+    if (session.userId && !session.isGuest) {
+        for (const other of Object.values(players)) {
+            if (other.authUserId === session.userId) other.ws.close(4000, "replaced");
+        }
+    }
+
+    ws.isAlive = true;
+    ws.on("pong", () => { ws.isAlive = true; });
+
     players[connectionId] = {
+        ws,
         connectionId,
         playerId,
         authUserId: session.userId || null,

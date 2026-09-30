@@ -503,6 +503,18 @@ function placePlayer() {
     highlight();
     updateCoords(); // Aggiorna l'HUD delle coordinate
     sendPlayerMove(); // Notifica sempre il server dello spostamento
+    scheduleSave();
+}
+
+// Salvataggio ritardato: raggruppa gli spostamenti ravvicinati in una sola richiesta.
+let saveTimer = null;
+function scheduleSave() {
+    if (saveTimer || !worldInitialized) return;
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        if (playerStats.isGuest) saveLocalPlayerStats();
+        else savePlayerData();
+    }, 3000);
 }
 function inLock(x, y) { return !lockRect || (x >= lockRect.x0 && x <= lockRect.x1 && y >= lockRect.y0 && y <= lockRect.y1); }
 function bump() { if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 }); }
@@ -1374,12 +1386,14 @@ function saveLocalPlayerStats() {
     try { localStorage.setItem('infiniteDokuStats', JSON.stringify(playerStats)); } catch { /* storage non disponibile */ }
 }
 
-// Salva la partita quando il giocatore chiude/aggiorna la pagina.
-// La sessione è un cookie, quindi sendBeacon la porta con sé in automatico (same-origin).
-window.addEventListener('beforeunload', () => {
+// Salva la partita quando la pagina viene chiusa o nascosta. "beforeunload" non è
+// affidabile (non parte su mobile e con la cache avanti/indietro), quindi si usa
+// "pagehide" + "visibilitychange" con una richiesta keepalive che sopravvive alla
+// chiusura. La sessione è un cookie, quindi viaggia con la richiesta (same-origin).
+function saveOnExit() {
     saveLocalPlayerStats();
 
-    if (playerStats.isGuest) return;
+    if (!worldInitialized || playerStats.isGuest) return;
 
     const payload = JSON.stringify({
         level,
@@ -1390,8 +1404,30 @@ window.addEventListener('beforeunload', () => {
         stats: playerStats.stats
     });
 
-    const blob = new Blob([payload], { type: 'application/json' });
-    navigator.sendBeacon('/api/save-stats', blob);
+    fetch('/api/save-stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true
+    }).catch(() => navigator.sendBeacon('/api/save-stats', new Blob([payload], { type: 'application/json' })));
+}
+
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveOnExit();
+});
+
+window.addEventListener("pagehide", () => {
+    saveOnExit();
+
+    // Chiude subito il socket: il server libera il giocatore senza aspettare il timeout
+    // e il client non tenta di riconnettersi mentre la pagina sta sparendo.
+    closing = true;
+    if (ws) ws.close(1000);
+});
+
+// Pagina ripristinata dalla cache avanti/indietro: lo stato (mondo, socket) è vecchio.
+window.addEventListener("pageshow", (e) => {
+    if (e.persisted) location.reload();
 });
 
 // ==========================================
@@ -1490,6 +1526,7 @@ function startOfflineMode(data) {
 
 // Connessione WebSocket con riconnessione automatica
 let reconnectDelay = 1000;
+let closing = false;
 function connectWebSocket() {
     if (ws) return;
 
@@ -1523,9 +1560,17 @@ function connectWebSocket() {
             }
         };
 
-        ws.onclose = () => {
+        ws.onclose = (e) => {
             ws = null;
             updateOtherPlayers([]);
+
+            // 4000 = lo stesso account è entrato da un'altra scheda: non riconnettersi
+            if (closing) return;
+            if (e.code === 4000) {
+                toast("Sei entrato da un'altra scheda: questa è disconnessa", "bad");
+                return;
+            }
+
             setTimeout(connectWebSocket, reconnectDelay);
             reconnectDelay = Math.min(reconnectDelay * 2, 30000);
         };
