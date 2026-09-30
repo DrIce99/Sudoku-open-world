@@ -1,0 +1,98 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #0f172a;
+    color: #f8fafc;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+.home-container {
+    width: 100%;
+    max-width: 480px;
+    padding: 2rem;
+}
+
+.player-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.player-header h2 {
+    font-size: 2rem;
+    color: #38bdf8;
+}
+
+.subtext {
+    color: #64748b;
+    font-size: 0.85rem;
+}
+
+.menu-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.2rem;
+}
+
+.btn-menu {
+    display: block;
+    text-align: center;
+    padding: 1rem;
+    border-radius: 10px;
+    text-decoration: none;
+    font-weight: bold;
+    transition: transform 0.2s, background 0.2s;
+}
+
+.btn-menu.play {
+    background-color: #16a34a;
+    color: #ffffff;
+    font-size: 1.1rem;
+}
+
+.btn-menu.play:hover {
+    background-color: #15803d;
+    transform: translateY(-2px);
+}
+
+.btn-menu.logout {
+    background-color: #dc2626;
+    color: #ffffff;
+}
+
+.btn-menu.logout:hover {
+    background-color: #b91c1c;
+}
+
+.stats-card {
+    background-color: #1e293b;
+    padding: 1.5rem;
+    border-radius: 12px;
+    border: 1px solid #334155;
+}
+
+.stats-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+    color: #cbd5e1;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 0.5rem;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    color: #94a3b8;
+}
+
+.stat-item strong {
+    color: #38bdf8;
+}

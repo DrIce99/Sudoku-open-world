@@ -1,67 +1,435 @@
 import express from "express";
+import http from "http";
+import path from "path";
+import { fileURLToPath } from "url";
+import session from "express-session";
 import { WebSocketServer } from "ws";
-import fs from "fs";
 import { randomUUID } from "crypto";
-import { initializeApp, cert } from "firebase-admin/app";
-import { getDatabase } from "firebase-admin/database";
+import { auth, db, getPlayerData } from "./firebase.js";
+import { FieldValue } from "firebase-admin/firestore";
 
-// Inizializza Firebase Admin SDK
-const serviceAccount = JSON.parse(fs.readFileSync('./serviceAccountKey.json', 'utf8'));
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
-initializeApp({
-    credential: cert(serviceAccount),
-    databaseURL: "https://infinite-doku-default-rtdb.europe-west1.firebasedatabase.app"
-});
-
-const database = getDatabase();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = http.createServer(app);
+const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
+
+// Middleware
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
-const PORT = 8080;
+const sessionMiddleware = session({
+    secret: "sudoku_secret_key_change_me",
+    resave: false,
+    saveUninitialized: false,
+    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 ore
+});
 
-// ============================================================
-// MONDO SAMURAI INFINITO
-// ============================================================
-// WORLD_VERSION serve a rigenerare il vecchio mondo se esiste già.
-// Se hai dati importanti su Firebase, fai prima un backup.
-const WORLD_VERSION = 2;
-const GENERATOR = "samurai-cross-v1";
+app.use(sessionMiddleware);
 
-// Se true, prova a conservare le scritture delle zone che restano giocabili.
-// Di solito, cambiando generazione, è più sicuro lasciarlo false.
-const PRESERVE_OLD_WRITES_ON_RESET = false;
-
-let worldState = { version: WORLD_VERSION, generator: GENERATOR, zones: {} };
-
-let players = {};
-
-// Modulo positivo
-const mod = (n, m) => ((n % m) + m) % m;
-
-const logDbError = err => console.error("Errore Firebase:", err);
-
-// Ritorna la chiave canonica "zx,zy" oppure null se non valida.
-// Evita chiavi arbitrarie usate come percorsi Firebase.
-function parseZoneKey(zoneKey) {
-    const parts = String(zoneKey ?? "").split(",");
-    if (parts.length !== 2) return null;
-    const zx = Number(parts[0]);
-    const zy = Number(parts[1]);
-    if (!Number.isInteger(zx) || !Number.isInteger(zy)) return null;
-    return { zx, zy, key: `${zx},${zy}` };
+// Middleware di protezione rotte (sostituisce @login_required)
+function requireAuth(req, res, next) {
+    if (!req.session.userId) {
+        return res.redirect("/login");
+    }
+    next();
 }
 
-const isColor = c => typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c);
-const cleanName = n => String(n ?? "").trim().slice(0, 24) || "Guest";
+function randomDiscriminator() {
+    return String(1000 + Math.floor(Math.random() * 9000));
+}
 
-/* ============================================================
-   PATTERN SAMURAI INFINITO (Sovrapposizione griglie 9x9)
-   Deve restare identico a quello del client.
-   ============================================================ */
+function isValidUsername(username) {
+    const trimmed = String(username || "").trim();
+
+    if (trimmed.length < 3 || trimmed.length > 20) return false;
+
+    // Vieta caratteri che daremmo fastidio all'ID o alla sicurezza/UI
+    if (/[#<>\/\\{}]/.test(trimmed)) return false;
+
+    return true;
+}
+
+function sanitizePlayerIdBase(name) {
+    return String(name || "")
+        .trim()
+        .replace(/#/g, "")
+        .replace(/\s+/g, " ")
+        .slice(0, 20) || "Player";
+}
+
+async function reserveUniquePlayerId(baseName, uid) {
+    const base = sanitizePlayerIdBase(baseName);
+
+    for (let attempt = 0; attempt < 30; attempt++) {
+        const candidate = `${base}#${randomDiscriminator()}`;
+        const ref = db.collection("playerIds").doc(candidate);
+
+        let reserved = false;
+
+        await db.runTransaction(async (t) => {
+            const snap = await t.get(ref);
+            if (snap.exists) return;
+
+            t.set(ref, {
+                uid,
+                createdAt: FieldValue.serverTimestamp()
+            });
+
+            reserved = true;
+        });
+
+        if (reserved) return candidate;
+    }
+
+    throw new Error("Impossibile generare un ID univoco");
+}
+
+async function ensurePlayerIdentity(userId) {
+    const userRef = db.collection("users").doc(userId);
+    const doc = await userRef.get();
+
+    let data = doc.exists ? doc.data() : await getPlayerData(userId);
+
+    // Migrazione: se un vecchio utente ha già username ma non playerId,
+    // generiamo l'ID pubblico una volta sola.
+    if (data.username && !data.playerId) {
+        const playerId = await reserveUniquePlayerId(data.username, userId);
+        await userRef.set({ playerId }, { merge: true });
+        data.playerId = playerId;
+    }
+
+    return data;
+}
+
+function normalizeProgress(data) {
+    const clean = { ...data };
+
+    // Non ci interessa salvare/usare hp e maxHp come dati persistenti
+    delete clean.hp;
+    delete clean.maxHp;
+
+    clean.level = Math.max(1, Math.floor(Number(clean.level) || 1));
+    clean.xp = Math.max(0, Math.floor(Number(clean.xp) || 0));
+
+    return clean;
+}
+
+// ==================== ROTTE HTML ====================
+
+app.get("/login", (req, res) => {
+    // Se l'utente è già autenticato e ha già completato il profilo,
+    // lo mandiamo alla home. Se manca il nickname, lasciamo la pagina
+    // e il client mostrerà la sezione username.
+    if (req.session.userId && req.session.usernameSet && !req.session.isGuest) {
+        return res.redirect("/");
+    }
+
+    if (req.session.isGuest) {
+        return res.redirect("/game");
+    }
+
+    res.sendFile(path.join(__dirname, "views", "login.html"));
+});
+
+app.get("/", requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, "views", "home.html"));
+});
+
+app.get("/game", requireAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, "views", "game.html"));
+});
+
+// ==================== API AUTH ====================
+
+app.post("/api/login", async (req, res) => {
+    const { idToken } = req.body;
+
+    try {
+        const decodedToken = await auth.verifyIdToken(idToken);
+        const userId = decodedToken.uid;
+
+        const playerData = await ensurePlayerIdentity(userId);
+
+        req.session.userId = userId;
+        req.session.isGuest = false;
+        req.session.userName = playerData.username || decodedToken.name || "Player";
+        req.session.playerId = playerData.playerId || null;
+        req.session.usernameSet = !!playerData.username;
+
+        if (!playerData.username) {
+            return res.json({
+                status: "need_username",
+                message: "Username richiesto"
+            });
+        }
+
+        res.json({
+            status: "success",
+            user: normalizeProgress(playerData)
+        });
+    } catch (error) {
+        console.error("Errore Login:", error);
+        res.status(401).json({ status: "error", message: error.message });
+    }
+});
+
+// Aggiungi la rotta per il login Offline / Ospite prima delle API protette
+app.post("/api/guest-login", (req, res) => {
+    req.session.userId = "guest_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    req.session.userName = "Giocatore Offline";
+    req.session.isGuest = true;
+    req.session.usernameSet = true;
+    req.session.playerId = `Guest#${randomDiscriminator()}`;
+
+    res.json({
+        status: "success",
+        playerId: req.session.playerId
+    });
+});
+
+app.get("/api/login-state", async (req, res) => {
+    try {
+        if (!req.session.userId) {
+            return res.json({
+                authenticated: false,
+                isGuest: false,
+                needUsername: false
+            });
+        }
+
+        if (req.session.isGuest) {
+            if (!req.session.playerId) {
+                req.session.playerId = `Guest#${randomDiscriminator()}`;
+            }
+
+            return res.json({
+                authenticated: true,
+                isGuest: true,
+                needUsername: false,
+                playerId: req.session.playerId
+            });
+        }
+
+        const data = await ensurePlayerIdentity(req.session.userId);
+
+        req.session.userName = data.username || req.session.userName || "Player";
+        req.session.playerId = data.playerId || null;
+        req.session.usernameSet = !!data.username;
+
+        res.json({
+            authenticated: true,
+            isGuest: false,
+            needUsername: !data.username,
+            playerId: data.playerId || null
+        });
+    } catch (err) {
+        console.error("Errore login-state:", err);
+        res.json({
+            authenticated: !!req.session.userId,
+            isGuest: !!req.session.isGuest,
+            needUsername: true
+        });
+    }
+});
+
+app.post("/api/set-username", requireAuth, async (req, res) => {
+    if (req.session.isGuest) {
+        return res.status(400).json({
+            status: "error",
+            message: "Gli ospiti non hanno un nickname permanente"
+        });
+    }
+
+    const username = String(req.body.username || "").trim();
+
+    if (!isValidUsername(username)) {
+        return res.status(400).json({
+            status: "error",
+            message: "Nickname non valido: 3-20 caratteri, senza # < > / \\ { }"
+        });
+    }
+
+    const userRef = db.collection("users").doc(req.session.userId);
+    const doc = await userRef.get();
+    const data = doc.exists ? doc.data() : {};
+
+    // Il nickname può essere impostato UNA sola volta
+    if (data.username) {
+        return res.status(409).json({
+            status: "error",
+            message: "Nickname già impostato e non modificabile"
+        });
+    }
+
+    const playerId = await reserveUniquePlayerId(username, req.session.userId);
+
+    await userRef.set({
+        username,
+        playerId,
+        usernameSetAt: FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    req.session.userName = username;
+    req.session.playerId = playerId;
+    req.session.usernameSet = true;
+
+    res.json({
+        status: "success",
+        username,
+        playerId
+    });
+});
+
+// Modifica la rotta /api/player per gestire la sessione ospite
+app.get("/api/player", requireAuth, async (req, res) => {
+    try {
+        if (req.session.isGuest) {
+            if (!req.session.playerId) {
+                req.session.playerId = `Guest#${randomDiscriminator()}`;
+            }
+
+            return res.json({
+                status: "success",
+                data: {
+                    username: req.session.userName || "Giocatore Offline",
+                    playerId: req.session.playerId,
+                    isGuest: true,
+                    level: 1,
+                    xp: 0,
+                    stats: {
+                        completedSudokus: 0,
+                        placedNumbers: 0,
+                        wrongPlacements: 0
+                    }
+                }
+            });
+        }
+
+        const data = await ensurePlayerIdentity(req.session.userId);
+
+        if (!data.username) {
+            return res.json({
+                status: "need_username",
+                message: "Username richiesto"
+            });
+        }
+
+        req.session.userName = data.username;
+        req.session.playerId = data.playerId || null;
+        req.session.usernameSet = true;
+
+        res.json({
+            status: "success",
+            data: normalizeProgress(data)
+        });
+    } catch (err) {
+        console.error("Errore /api/player:", err);
+        res.status(500).json({ status: "error", message: err.message });
+    }
+});
+
+app.get("/logout", (req, res) => {
+    req.session.destroy(() => {
+        res.redirect("/login");
+    });
+});
+
+// ==================== SALVATAGGIO PROGRESSI ====================
+// Il client non conosce/non passa mai lo userId: viene sempre preso dalla sessione.
+
+app.post("/api/save-progress", requireAuth, async (req, res) => {
+    if (req.session.isGuest) {
+        return res.json({ status: "success", skipped: true });
+    }
+
+    const { x, y, level, xp } = req.body || {};
+
+    try {
+        const update = {};
+
+        const lvl = Math.floor(Number(level));
+        const xpVal = Math.floor(Number(xp));
+
+        if (Number.isFinite(lvl) && lvl >= 1) {
+            update.level = lvl;
+        }
+
+        if (Number.isFinite(xpVal) && xpVal >= 0) {
+            update.xp = xpVal;
+        }
+
+        if (Number.isFinite(x) && Number.isFinite(y)) {
+            update.currentPosition = { x, y };
+        }
+
+        if (Object.keys(update).length) {
+            await db.collection("users").doc(req.session.userId).update(update);
+        }
+
+        res.json({ status: "success" });
+    } catch (err) {
+        console.error("Errore salvataggio progressi:", err);
+        res.status(500).json({ status: "error", message: err.message });
+    }
+});
+
+// Endpoint "di emergenza" chiamato via navigator.sendBeacon al beforeunload.
+// Riceve l'intero oggetto playerStats del client (level, xp, hp, x, y, stats.*).
+app.post("/api/save-stats", requireAuth, async (req, res) => {
+    if (req.session.isGuest) return res.status(204).end();
+
+    const body = req.body || {};
+    const update = {};
+
+    const lvl = Math.floor(Number(body.level));
+    const xpVal = Math.floor(Number(body.xp));
+
+    if (Number.isFinite(lvl) && lvl >= 1) update.level = lvl;
+    if (Number.isFinite(xpVal) && xpVal >= 0) update.xp = xpVal;
+
+    if (Number.isFinite(body.x) && Number.isFinite(body.y)) {
+        update.currentPosition = { x: body.x, y: body.y };
+    }
+
+    if (Number.isFinite(body.deaths)) update.deaths = body.deaths;
+
+    if (body.stats && typeof body.stats === "object") {
+        if (Number.isFinite(body.stats.completedSudokus)) {
+            update["stats.completedSudokus"] = body.stats.completedSudokus;
+        }
+        if (Number.isFinite(body.stats.placedNumbers)) {
+            update["stats.placedNumbers"] = body.stats.placedNumbers;
+        }
+        if (Number.isFinite(body.stats.wrongPlacements)) {
+            update["stats.wrongPlacements"] = body.stats.wrongPlacements;
+        }
+    }
+
+    try {
+        if (Object.keys(update).length) {
+            await db.collection("users").doc(req.session.userId).update(update);
+        }
+        res.status(204).end();
+    } catch (err) {
+        console.error("Errore save-stats:", err);
+        res.status(500).end();
+    }
+});
+
+// ==================== MOTORE MONDO SAMURAI INFINITO (WebSocket) ====================
+// Stessa logica deterministica del client (game.js): a parità di seed, client e
+// server calcolano indipendentemente la stessa soluzione sudoku, quindi non serve
+// trasmettere il mondo intero — solo le celle scritte dai giocatori vengono salvate qui.
+
+const WORLD_SEED = 20260222;
+
+const mod = (n, m) => ((n % m) + m) % m;
+
 function isPlayableZone(zx, zy) {
-    // Il blocco (zx, zy) è giocabile se fa parte di almeno una griglia 9x9 (3x3 blocchi).
-    // Le origini delle griglie hanno coordinate pari con somma multipla di 4.
     for (let gx = zx - 2; gx <= zx; gx++) {
         if (mod(gx, 2) !== 0) continue;
         for (let gy = zy - 2; gy <= zy; gy++) {
@@ -79,13 +447,17 @@ function solutionAtCell(x, y) {
     return ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
 }
 
-// Stato in memoria di una zona, normalizzato: Firebase non salva oggetti vuoti,
-// quindi una zona caricata può non avere "writes".
-function zoneState(key) {
-    const z = worldState.zones[key] ??= { disc: false, writes: {} };
-    z.writes ??= {};
-    return z;
+// Ritorna { zx, zy, key } con la chiave canonica, oppure null se non valida.
+function parseZoneKey(zoneKey) {
+    const parts = String(zoneKey ?? "").split(",");
+    if (parts.length !== 2) return null;
+    const zx = Number(parts[0]);
+    const zy = Number(parts[1]);
+    if (!Number.isInteger(zx) || !Number.isInteger(zy)) return null;
+    return { zx, zy, key: `${zx},${zy}` };
 }
+
+const isColor = c => typeof c === "string" && /^#[0-9a-fA-F]{3,8}$/.test(c);
 
 function broadcast(data) {
     const payload = JSON.stringify(data);
@@ -94,106 +466,108 @@ function broadcast(data) {
     });
 }
 
-// Manda a tutti la lista aggiornata dei player online
+// worldState.zones[zoneKey] = { writes: { "lx,ly": {val,color} }, disc: bool }
+// In memoria per semplicità: si azzera se il processo riparte. Se vuoi la
+// persistenza tra riavvii, questo è il punto dove salvare/leggere da Firestore
+// (es. una collection "worldZones" con un documento per zoneKey).
+const worldState = { zones: {} };
+
+function zoneState(key) {
+    return worldState.zones[key] ??= { writes: {}, disc: false };
+}
+
+let players = {};
+
 function broadcastPlayers() {
-    broadcast({
-        type: "players",
-        data: Object.values(players).map(({ id, x, y, name, color }) => ({ id, x, y, name, color }))
-    });
+    const playersData = Object.values(players).map(p => ({
+        id: p.connectionId,
+        connectionId: p.connectionId,
+        playerId: p.playerId,
+        x: p.x,
+        y: p.y,
+        name: p.name,
+        color: p.color
+    }));
+
+    broadcast({ type: "players", data: playersData });
 }
 
-// Caricamento del mondo da Firebase
-async function loadWorld() {
-    const snapshot = await database.ref("worldState").get();
-    const loaded = snapshot.exists() ? snapshot.val() : null;
+wss.on("connection", (ws, req) => {
+    const connectionId = randomUUID();
+    const session = req.session || {};
 
-    if (loaded && Number(loaded.version) === WORLD_VERSION) {
-        worldState = { version: WORLD_VERSION, generator: GENERATOR, zones: loaded.zones || {} };
-        console.log("Mondo caricato da Firebase.");
-        return;
-    }
+    // Se non c'è un playerId di sessione, usarne uno temporaneo
+    const playerId = session.playerId || `Guest#${randomDiscriminator()}`;
+    const displayName = session.userName || "Guest";
 
-    const zones = {};
-    if (loaded && PRESERVE_OLD_WRITES_ON_RESET && loaded.zones) {
-        for (const [zoneKey, zoneData] of Object.entries(loaded.zones)) {
-            const zk = parseZoneKey(zoneKey);
-            if (zk && isPlayableZone(zk.zx, zk.zy) && zoneData?.writes) {
-                zones[zk.key] = { disc: true, writes: zoneData.writes };
-            }
-        }
-    }
-
-    console.log(loaded ? "Vecchio mondo rilevato. Genero nuovo mondo samurai..." : "Generazione nuovo mondo su Firebase...");
-    worldState = { version: WORLD_VERSION, generator: GENERATOR, zones };
-    await database.ref("worldState").set(worldState);
-    console.log("Nuovo mondo samurai salvato su Firebase.");
-}
-
-const wss = new WebSocketServer({ noServer: true, maxPayload: 16 * 1024 });
-
-wss.on("connection", (ws) => {
-    const myId = randomUUID();
-
-    players[myId] = { id: myId, x: 0, y: 0, name: "Guest", color: "#38bdf8" };
+    players[connectionId] = {
+        connectionId,
+        playerId,
+        authUserId: session.userId || null,
+        isGuest: !!session.isGuest,
+        x: 4,
+        y: 4,
+        name: displayName,
+        color: "#38bdf8"
+    };
 
     ws.send(JSON.stringify({
         type: "init",
-        myId,
-        generator: { version: WORLD_VERSION, pattern: GENERATOR }
+        myId: connectionId,
+        myPlayerId: playerId,
+        generator: {
+            seed: WORLD_SEED,
+            pattern: "samurai-cross-v1"
+        }
     }));
 
     ws.on("message", (message) => {
         let msg;
-        try { msg = JSON.parse(message); } catch { return; }
+        try {
+            msg = JSON.parse(message);
+        } catch (e) {
+            return;
+        }
         if (!msg || typeof msg !== "object") return;
 
-        const me = players[myId];
+        const p = players[connectionId];
+        if (!p) return;
 
         if (msg.type === "join") {
-            me.name = cleanName(msg.name);
-            if (isColor(msg.color)) me.color = msg.color;
-            if (Number.isInteger(msg.x) && Number.isInteger(msg.y)) {
-                me.x = msg.x;
-                me.y = msg.y;
-            }
+            // Per utenti autenticati il nickname deve venire dalla sessione,
+            // non dal client, così non può essere cambiato arbitrariamente.
+            p.name = session.userName || String(msg.name ?? "").trim().slice(0, 24) || "Guest";
+            if (isColor(msg.color)) p.color = msg.color;
+
+            if (Number.isInteger(msg.x)) p.x = msg.x;
+            if (Number.isInteger(msg.y)) p.y = msg.y;
+
             broadcastPlayers();
         }
-
         else if (msg.type === "move") {
             if (!Number.isInteger(msg.x) || !Number.isInteger(msg.y)) return;
-            me.x = msg.x;
-            me.y = msg.y;
+
+            p.x = msg.x;
+            p.y = msg.y;
+
             broadcastPlayers();
         }
-
         else if (msg.type === "fetch_zone") {
             const zk = parseZoneKey(msg.zoneKey);
             if (!zk) return;
 
             const playable = isPlayableZone(zk.zx, zk.zy);
-            if (!playable) {
-                ws.send(JSON.stringify({ type: "zone_info", zoneKey: zk.key, playable, disc: false, writes: {} }));
-                return;
-            }
+            const zone = playable ? zoneState(zk.key) : { writes: {} };
 
-            const zone = zoneState(zk.key);
-
-            // Se la zona viene scoperta per la prima volta, notifica subito TUTTI i giocatori online
-            if (msg.discover && !zone.disc) {
-                zone.disc = true;
-                database.ref(`worldState/zones/${zk.key}/disc`).set(true).catch(logDbError);
-                broadcast({ type: "zone_discovered", zoneKey: zk.key });
-            }
+            if (msg.discover) zone.disc = true;
 
             ws.send(JSON.stringify({
                 type: "zone_info",
                 zoneKey: zk.key,
                 playable,
-                disc: zone.disc,
                 writes: zone.writes
             }));
         }
-
         else if (msg.type === "write") {
             const zk = parseZoneKey(msg.zoneKey);
             if (!zk || !isPlayableZone(zk.zx, zk.zy)) return;
@@ -201,25 +575,25 @@ wss.on("connection", (ws) => {
             const { cx, cy, val } = msg;
             if (![cx, cy].every(v => Number.isInteger(v) && v >= 0 && v <= 2)) return;
 
-            // Il server accetta solo numeri corretti: un client modificato
-            // non può sporcare il mondo condiviso.
-            if (val !== solutionAtCell(zk.zx * 3 + cx, zk.zy * 3 + cy)) return;
-
             const zone = zoneState(zk.key);
-            const cellKey = `${cx},${cy}`;
-            if (zone.writes[cellKey]) return; // i numeri scritti sono permanenti
+            zone.disc = true;
 
-            const writeData = { val, color: isColor(msg.color) ? msg.color : players[myId].color };
-            zone.writes[cellKey] = writeData;
+            const writeKey = `${cx},${cy}`;
+            const color = isColor(msg.color) ? msg.color : null;
 
-            if (!zone.disc) {
-                zone.disc = true;
-                database.ref(`worldState/zones/${zk.key}/disc`).set(true).catch(logDbError);
+            if (val === 0) {
+                // Rimozione (es. attacco di un boss)
+                delete zone.writes[writeKey];
+            } else {
+                // Solo il numero corretto, e mai sopra uno già scritto:
+                // un client modificato non può sporcare il mondo condiviso.
+                if (val !== solutionAtCell(zk.zx * 3 + cx, zk.zy * 3 + cy)) return;
+                if (zone.writes[writeKey]) return;
+                zone.writes[writeKey] = { val, color };
             }
-            database.ref(`worldState/zones/${zk.key}/writes/${cellKey}`).set(writeData).catch(logDbError);
 
-            // Broadcast della scrittura a TUTTI i client connessi
-            broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color: writeData.color });
+            // Le coordinate globali vengono ricavate dal client a partire da zona e cella locale.
+            broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color });
         }
     });
 
@@ -227,21 +601,19 @@ wss.on("connection", (ws) => {
     ws.on("error", err => console.warn("Errore WebSocket:", err.message));
 
     ws.on("close", () => {
-        delete players[myId];
+        delete players[connectionId];
         broadcastPlayers();
     });
 });
 
-// Le connessioni vengono accettate solo dopo il caricamento del mondo,
-// altrimenti le scritture arrivate prima verrebbero perse.
-loadWorld()
-    .then(() => {
-        const server = app.listen(PORT, () => console.log(`Server Sudoku attivo su porta ${PORT}`));
-        server.on("upgrade", (req, socket, head) => {
-            wss.handleUpgrade(req, socket, head, ws => wss.emit("connection", ws, req));
+server.on("upgrade", (req, socket, head) => {
+    sessionMiddleware(req, {}, () => {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+            wss.emit("connection", ws, req);
         });
-    })
-    .catch(err => {
-        console.error("Impossibile caricare il mondo da Firebase:", err);
-        process.exit(1);
     });
+});
+
+server.listen(3000, () => {
+    console.log("Server attivo su http://localhost:3000");
+});
