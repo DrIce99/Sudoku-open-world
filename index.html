@@ -38,16 +38,13 @@
             con Google</button>
         <button id="offlineBtn">Gioca Offline</button>
         <div id="usernameArea" style="display:none;margin-top:20px;">
-            <input id="usernameInput" type="text" placeholder="Scegli un username"
+            <input id="usernameInput" type="text" maxlength="24" placeholder="Scegli un username"
                 style="padding:10px;border-radius:8px;border:none;color:black;">
             <button id="startGameBtn"
                 style="padding:10px 16px;background:#22c55e;color:white;border:none;border-radius:8px;cursor:pointer;">Entra
                 nel Mondo</button>
         </div>
     </div>
-
-    <!-- CONTENITORI PLAYER MULTIPLAYER -->
-    <div id="otherPlayers" style="position:absolute;top:0;left:0;width:0;height:0;pointer-events:none;z-index:5;"></div>
 
     <div id="stage">
         <div id="gridBg"></div>
@@ -74,6 +71,7 @@
             <kbd>1‑9</kbd> scrivi il numero corretto della cella in cui sei, oppure <b>spostati</b> nella cella
             adiacente (su/giù/destra/sinistra) con quel numero.<br>
             Numero sbagliato in cella vuota → ignora + danno.<br>
+            <kbd>N</kbd> note a matita · <kbd>0</kbd>/<kbd>Canc</kbd> cancella le note.<br>
             <kbd>R</kbd> blocca il mondo (resti nella finestra 9×9 centrata).<br>
             <kbd>M</kbd> mappa (pan frecce · zoom Q/E).<br>
             Il tuo 3×3 è sempre al centro: entrando in un nuovo 3×3 il mondo scorre e le zone mancanti vengono generate.
