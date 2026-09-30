@@ -5,8 +5,7 @@ import { fileURLToPath } from "url";
 import session from "express-session";
 import { WebSocketServer } from "ws";
 import { randomUUID } from "crypto";
-import { auth, db, getPlayerData } from "./firebase.js";
-import { FieldValue } from "firebase-admin/firestore";
+import { auth, db, getPlayerData, updatePlayerData, serverTimestamp } from "./firebase.js";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -61,44 +60,34 @@ function sanitizePlayerIdBase(name) {
         .slice(0, 20) || "Player";
 }
 
+// Le chiavi del Realtime Database non possono contenere . $ # [ ] /
+const idKey = id => id.replace(/[.$#\[\]\/%]/g, c => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+
 async function reserveUniquePlayerId(baseName, uid) {
     const base = sanitizePlayerIdBase(baseName);
 
     for (let attempt = 0; attempt < 30; attempt++) {
         const candidate = `${base}#${randomDiscriminator()}`;
-        const ref = db.collection("playerIds").doc(candidate);
 
-        let reserved = false;
+        // La transazione scrive solo se l'ID è libero
+        const { committed } = await db.ref(`playerIds/${idKey(candidate)}`).transaction(
+            current => current === null ? { uid, createdAt: Date.now() } : undefined
+        );
 
-        await db.runTransaction(async (t) => {
-            const snap = await t.get(ref);
-            if (snap.exists) return;
-
-            t.set(ref, {
-                uid,
-                createdAt: FieldValue.serverTimestamp()
-            });
-
-            reserved = true;
-        });
-
-        if (reserved) return candidate;
+        if (committed) return candidate;
     }
 
     throw new Error("Impossibile generare un ID univoco");
 }
 
 async function ensurePlayerIdentity(userId) {
-    const userRef = db.collection("users").doc(userId);
-    const doc = await userRef.get();
-
-    let data = doc.exists ? doc.data() : await getPlayerData(userId);
+    const data = await getPlayerData(userId);
 
     // Migrazione: se un vecchio utente ha già username ma non playerId,
     // generiamo l'ID pubblico una volta sola.
     if (data.username && !data.playerId) {
         const playerId = await reserveUniquePlayerId(data.username, userId);
-        await userRef.set({ playerId }, { merge: true });
+        await updatePlayerData(userId, { playerId });
         data.playerId = playerId;
     }
 
@@ -253,9 +242,7 @@ app.post("/api/set-username", requireAuth, async (req, res) => {
         });
     }
 
-    const userRef = db.collection("users").doc(req.session.userId);
-    const doc = await userRef.get();
-    const data = doc.exists ? doc.data() : {};
+    const data = await getPlayerData(req.session.userId);
 
     // Il nickname può essere impostato UNA sola volta
     if (data.username) {
@@ -267,11 +254,11 @@ app.post("/api/set-username", requireAuth, async (req, res) => {
 
     const playerId = await reserveUniquePlayerId(username, req.session.userId);
 
-    await userRef.set({
+    await updatePlayerData(req.session.userId, {
         username,
         playerId,
-        usernameSetAt: FieldValue.serverTimestamp()
-    }, { merge: true });
+        usernameSetAt: serverTimestamp()
+    });
 
     req.session.userName = username;
     req.session.playerId = playerId;
@@ -367,7 +354,7 @@ app.post("/api/save-progress", requireAuth, async (req, res) => {
         }
 
         if (Object.keys(update).length) {
-            await db.collection("users").doc(req.session.userId).update(update);
+            await updatePlayerData(req.session.userId, update);
         }
 
         res.json({ status: "success" });
@@ -399,19 +386,19 @@ app.post("/api/save-stats", requireAuth, async (req, res) => {
 
     if (body.stats && typeof body.stats === "object") {
         if (Number.isFinite(body.stats.completedSudokus)) {
-            update["stats.completedSudokus"] = body.stats.completedSudokus;
+            update["stats/completedSudokus"] = body.stats.completedSudokus;
         }
         if (Number.isFinite(body.stats.placedNumbers)) {
-            update["stats.placedNumbers"] = body.stats.placedNumbers;
+            update["stats/placedNumbers"] = body.stats.placedNumbers;
         }
         if (Number.isFinite(body.stats.wrongPlacements)) {
-            update["stats.wrongPlacements"] = body.stats.wrongPlacements;
+            update["stats/wrongPlacements"] = body.stats.wrongPlacements;
         }
     }
 
     try {
         if (Object.keys(update).length) {
-            await db.collection("users").doc(req.session.userId).update(update);
+            await updatePlayerData(req.session.userId, update);
         }
         res.status(204).end();
     } catch (err) {
@@ -468,8 +455,8 @@ function broadcast(data) {
 
 // worldState.zones[zoneKey] = { writes: { "lx,ly": {val,color} }, disc: bool }
 // In memoria per semplicità: si azzera se il processo riparte. Se vuoi la
-// persistenza tra riavvii, questo è il punto dove salvare/leggere da Firestore
-// (es. una collection "worldZones" con un documento per zoneKey).
+// persistenza tra riavvii, questo è il punto dove salvare/leggere dal Realtime Database
+// (es. un nodo "worldState/zones/<zoneKey>" per zona).
 const worldState = { zones: {} };
 
 function zoneState(key) {

@@ -1,5 +1,5 @@
 import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getDatabase, ServerValue } from "firebase-admin/database";
 import { getAuth } from "firebase-admin/auth";
 import { readFileSync } from "fs";
 
@@ -9,38 +9,51 @@ const serviceAccount = JSON.parse(
 );
 
 initializeApp({
-    credential: cert(serviceAccount)
+    credential: cert(serviceAccount),
+    databaseURL: "https://infinite-doku-default-rtdb.europe-west1.firebasedatabase.app"
 });
 
-export const db = getFirestore();
+export const db = getDatabase();
 export const auth = getAuth();
+export const serverTimestamp = () => ServerValue.TIMESTAMP;
 
-// Helper per ottenere i dati del giocatore
-export async function getPlayerData(userId) {
-    const userRef = db.collection("users").doc(userId);
-    const doc = await userRef.get();
+const userRef = (userId) => db.ref(`users/${userId}`);
 
-    if (doc.exists) {
-        return doc.data();
-    }
-
-    // Dati di default per un nuovo giocatore
-    const defaultData = {
+// Il Realtime Database non salva null, oggetti e array vuoti: i campi mancanti
+// vengono quindi riportati ai valori di default alla lettura.
+function withDefaults(data) {
+    return {
         name: "",
         username: null,       // nickname scelto dall'utente, non modificabile
         playerId: null,       // ID pubblico unico, tipo "Mario#4821"
-        created_at: FieldValue.serverTimestamp(),
         level: 1,
         xp: 0,
+        inventory: [],
+        currentPosition: { x: 0, y: 0 },
+        ...data,
         stats: {
             completedSudokus: 0,
             placedNumbers: 0,
-            wrongPlacements: 0
-        },
-        inventory: [],
-        currentPosition: { x: 0, y: 0 }
+            wrongPlacements: 0,
+            ...data?.stats
+        }
     };
+}
 
-    await userRef.set(defaultData);
+// Legge i dati del giocatore; se non esistono li crea con i valori di default.
+export async function getPlayerData(userId) {
+    const snap = await userRef(userId).get();
+
+    if (snap.exists()) {
+        return withDefaults(snap.val());
+    }
+
+    const defaultData = withDefaults({});
+    await userRef(userId).set({ ...defaultData, created_at: serverTimestamp() });
     return defaultData;
+}
+
+// Aggiorna alcuni campi del giocatore. Le chiavi possono essere percorsi ("stats/placedNumbers").
+export function updatePlayerData(userId, patch) {
+    return userRef(userId).update(patch);
 }
