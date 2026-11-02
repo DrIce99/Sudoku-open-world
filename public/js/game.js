@@ -178,11 +178,6 @@ function applyRemoteWrite(msg) {
     if (el) el.style.color = displayColor;
     window.FX?.remoteNumber(gx, gy, displayColor);
 
-    // Hook per i boss: numero corretto inserito da un altro giocatore
-    if (msg.val && window.bossManager?.onNumberPlaced) {
-        window.bossManager.onNumberPlaced(gx, gy, msg.val, true);
-    }
-
     if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
         highlight();
     }
@@ -522,6 +517,25 @@ function scheduleSave() {
         else savePlayerData();
     }, 3000);
 }
+// Posizione decisa dal server (spinta, cella occupata, teletrasporto nel party)
+function forcePosition(x, y) {
+    // il server conosce già questa posizione: niente messaggio "move" di ritorno
+    lastSentX = x;
+    lastSentY = y;
+
+    const nz = zOf(x, y);
+    if (follow) enterZone(nz.x, nz.y);
+    else ensureZoneForMovement(nz.x, nz.y);
+
+    player.x = x;
+    player.y = y;
+    curZone = nz;
+    placePlayer();
+
+    if (follow) recenter(true);
+    checkUnits();
+}
+
 function inLock(x, y) { return !lockRect || (x >= lockRect.x0 && x <= lockRect.x1 && y >= lockRect.y0 && y <= lockRect.y1); }
 function bump() {
     if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 });
@@ -728,11 +742,7 @@ function doWrite(z, li, d) {
     gainXp(5);
     checkUnits();
     highlight();
-
-    // Hook per i boss: numero corretto inserito
-    if (window.bossManager?.onNumberPlaced) {
-        window.bossManager.onNumberPlaced(cx, cy, d, false);
-    }
+    // L'effetto sui boss (vita / timer) lo calcola il server alla ricezione della scrittura
 }
 function sendWrite(cx, cy, d) {
     if (!ws || ws.readyState !== 1) return;
@@ -834,11 +844,6 @@ function checkUnits() {
             // (solo givens o numeri di altri giocatori)
             if (!write) continue;
 
-            // Hook per i boss: riga / colonna / box 3x3 completata
-            if (window.bossManager?.onUnitCompleted) {
-                window.bossManager.onUnitCompleted(t, uk, cellsU);
-            }
-
             gainXp(20);
 
             toast(
@@ -891,11 +896,6 @@ function checkUnits() {
         if (hasPlayable && full) {
             doneWindows.add(windowKey);
             if (write) {
-                // Hook per i boss: finestra 9x9 completata
-                if (window.bossManager?.onWindowCompleted) {
-                    window.bossManager.onWindowCompleted(windowKey, winZone.x, winZone.y);
-                }
-
                 gainXp(150);
                 showWin();
             }
@@ -1192,6 +1192,7 @@ function fit() {
     document.documentElement.style.setProperty("--cell", CELL + "px");
     gridBg.style.backgroundSize = CELL + "px " + CELL + "px";
     setActiveBlock(lastBlock.bx, lastBlock.by, true);
+    window.bossManager?.relayout();
     applyCamera();
     highlight();
 }
@@ -1563,6 +1564,7 @@ function connectWebSocket() {
             ws = null;
             updateOtherPlayers([]);
             window.Social?.onDisconnected();
+            window.bossManager?.clear();
 
             // 4000 = lo stesso account è entrato da un'altra scheda: non riconnettersi
             if (closing) return;
@@ -1579,6 +1581,7 @@ function connectWebSocket() {
             let msg;
             try { msg = JSON.parse(event.data); } catch { return; }
             window.Social?.onMessage(msg);
+            window.bossManager?.onMessage(msg);
 
             if (msg.type === "init") {
                 myId = msg.myId;
@@ -1591,6 +1594,19 @@ function connectWebSocket() {
             }
             else if (msg.type === "players") {
                 updateOtherPlayers(msg.data);
+            }
+            else if (msg.type === "forced_move") {
+                const from = { x: player.x, y: player.y };
+                forcePosition(msg.x, msg.y);
+                window.FX?.forcedMove(from, msg.x, msg.y, msg.reason, msg.by);
+            }
+            else if (msg.type === "move_rejected") {
+                // la cella è occupata da un giocatore che non si può spingere
+                forcePosition(msg.x, msg.y);
+                bump();
+            }
+            else if (msg.type === "pushed_other") {
+                window.FX?.pushedOther();
             }
             else if (msg.type === "write") {
                 applyRemoteWrite(msg);

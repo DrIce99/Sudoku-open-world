@@ -6,6 +6,8 @@ import session from "express-session";
 import { WebSocketServer } from "ws";
 import { randomUUID } from "crypto";
 import { auth, db, getPlayerData, updatePlayerData, serverTimestamp } from "./firebase.js";
+import { WORLD_SEED, isPlayableZone, solutionAtCell, revealedMask } from "./worldgen.js";
+import { createBossSystem } from "./bossServer.js";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -674,31 +676,9 @@ app.post("/api/friends/remove", requireAccount, api(async (req) => {
 }));
 
 // ==================== MOTORE MONDO SAMURAI INFINITO (WebSocket) ====================
-// Stessa logica deterministica del client (game.js): a parità di seed, client e
-// server calcolano indipendentemente la stessa soluzione sudoku, quindi non serve
+// Stessa logica deterministica del client (worldgen.js <-> game.js): a parità di seed,
+// client e server calcolano indipendentemente la stessa soluzione sudoku, quindi non serve
 // trasmettere il mondo intero — solo le celle scritte dai giocatori vengono salvate qui.
-
-const WORLD_SEED = 20260222;
-
-const mod = (n, m) => ((n % m) + m) % m;
-
-function isPlayableZone(zx, zy) {
-    for (let gx = zx - 2; gx <= zx; gx++) {
-        if (mod(gx, 2) !== 0) continue;
-        for (let gy = zy - 2; gy <= zy; gy++) {
-            if (mod(gy, 2) !== 0) continue;
-            if (mod(gx + gy, 4) === 0) return true;
-        }
-    }
-    return false;
-}
-
-// Soluzione Sudoku infinita deterministica (identica al client).
-function solutionAtCell(x, y) {
-    const r = mod(y, 9);
-    const c = mod(x, 9);
-    return ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
-}
 
 // Ritorna { zx, zy, key } con la chiave canonica, oppure null se non valida.
 function parseZoneKey(zoneKey) {
@@ -752,6 +732,107 @@ function broadcastPlayers() {
 
     broadcast({ type: "players", data: playersData });
 }
+
+const bossSystem = createBossSystem({
+    zoneState,
+    worldPlayers: () => Object.values(players).filter(p => !p.lobby),
+    broadcast
+});
+
+// ==================== POSIZIONI: UN SOLO GIOCATORE PER CELLA ====================
+// Il server decide le posizioni. Un passo verso una cella occupata spinge l'altro
+// giocatore nella stessa direzione; se non si può spingere, il passo viene annullato.
+// Un teletrasporto (respawn, posizione salvata, party) su una cella occupata finisce
+// sulla cella libera più vicina. Ai client arrivano:
+//   forced_move  { x, y, reason: "push" | "occupied" | "party", by }  -> la tua nuova posizione
+//   move_rejected { x, y }                                            -> passo annullato
+//   pushed_other { name }                                             -> hai spinto qualcuno
+
+const occupantAt = (x, y, except) =>
+    Object.values(players).find(o => o !== except && !o.lobby && o.x === x && o.y === y) || null;
+
+const isPlayableCell = (x, y) => isPlayableZone(Math.floor(x / 3), Math.floor(y / 3));
+
+function sendJson(p, data) {
+    if (p.ws.readyState === 1) p.ws.send(JSON.stringify(data));
+}
+
+// Cella libera più vicina a (x, y): prima le celle vuote (senza numero), poi le altre.
+// Con `arena` la ricerca resta dentro l'arena di quel boss (o fuori da tutte, se null).
+function nearestFree(x, y, who, arena = undefined) {
+    let fallback = null;
+    for (let r = 0; r <= 6; r++) {
+        for (let dy = -r; dy <= r; dy++) {
+            for (let dx = -r; dx <= r; dx++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                const cx = x + dx, cy = y + dy;
+                if (!isPlayableCell(cx, cy) || occupantAt(cx, cy, who)) continue;
+                if (arena !== undefined && bossSystem.arenaAt(cx, cy) !== arena) continue;
+                if (!bossSystem.cellFilled(cx, cy)) return { x: cx, y: cy };
+                fallback ??= { x: cx, y: cy };
+            }
+        }
+        if (fallback) return fallback;
+    }
+    return { x, y };
+}
+
+// Sposta un giocatore d'ufficio e glielo comunica
+function forceMove(p, x, y, reason, by = null) {
+    p.x = x;
+    p.y = y;
+    sendJson(p, { type: "forced_move", x, y, reason, by });
+}
+
+// Teletrasporto: se la destinazione è occupata si va sulla cella libera più vicina
+function placeAt(p, x, y, reason = "occupied") {
+    if (!occupantAt(x, y, p)) {
+        p.x = x;
+        p.y = y;
+        return false;
+    }
+    const free = nearestFree(x, y, p);
+    forceMove(p, free.x, free.y, reason);
+    return true;
+}
+
+function handleMove(p, x, y) {
+    const other = occupantAt(x, y, p);
+    const dx = x - p.x, dy = y - p.y;
+
+    if (!other) {
+        p.x = x;
+        p.y = y;
+    } else if (Math.abs(dx) + Math.abs(dy) === 1) {
+        // Spinta: l'altro avanza di una cella nella stessa direzione, senza uscire
+        // dall'arena del boss in cui si trova (né entrarci da fuori)
+        const tx = other.x + dx, ty = other.y + dy;
+        const ok = isPlayableCell(tx, ty) && !occupantAt(tx, ty, other) &&
+            bossSystem.arenaAt(tx, ty) === bossSystem.arenaAt(other.x, other.y);
+        if (!ok) return sendJson(p, { type: "move_rejected", x: p.x, y: p.y });
+
+        forceMove(other, tx, ty, "push", p.name);
+        p.x = x;
+        p.y = y;
+        sendJson(p, { type: "pushed_other", name: other.name });
+    } else {
+        placeAt(p, x, y);
+    }
+    broadcastPlayers();
+}
+
+// Teletrasporto accanto a un compagno (invito al party accettato)
+function teleportNextTo(p, host) {
+    if (p.lobby || host.lobby) return false;
+    const spot = nearestFree(host.x, host.y, p, bossSystem.arenaAt(host.x, host.y));
+    if (spot.x === host.x && spot.y === host.y) return false;
+    forceMove(p, spot.x, spot.y, "party", host.name);
+    broadcastPlayers();
+    return true;
+}
+
+// Chi accetta un invito dalla home viene teletrasportato appena entra nel mondo
+const pendingTeleport = new Map();   // playerId -> playerId dell'host
 
 // ==================== PARTY ====================
 // In memoria come lo stato del mondo. I membri sono identificati dal playerId pubblico,
@@ -868,6 +949,11 @@ function partyAccept(p, fromPid) {
     partyOf.set(p.playerId, party.id);
     invites.get(p.playerId)?.clear();
     syncParty(party);
+
+    // L'invitato raggiunge chi l'ha invitato (subito, o appena entra nel mondo)
+    const host = connOf(fromPid);
+    if (host && !host.lobby && p.lobby) pendingTeleport.set(p.playerId, fromPid);
+    else if (host) teleportNextTo(p, host);
 }
 
 function partyDecline(p, fromPid) {
@@ -977,10 +1063,18 @@ wss.on("connection", (ws, req) => {
             // Il colore lo decide il server (da playerId), uguale in gioco e in home
             p.name = session.userName || String(msg.name ?? "").trim().slice(0, 24) || "Guest";
 
-            if (Number.isInteger(msg.x)) p.x = msg.x;
-            if (Number.isInteger(msg.y)) p.y = msg.y;
+            if (!p.lobby && Number.isInteger(msg.x) && Number.isInteger(msg.y)) placeAt(p, msg.x, msg.y);
+
+            // Invito al party accettato dalla home: si parte accanto all'host
+            const hostPid = pendingTeleport.get(p.playerId);
+            if (!p.lobby && hostPid) {
+                pendingTeleport.delete(p.playerId);
+                const host = connOf(hostPid);
+                if (host && partyOf.get(hostPid) && partyOf.get(hostPid) === partyOf.get(p.playerId)) teleportNextTo(p, host);
+            }
 
             broadcastPlayers();
+            if (!p.lobby) ws.send(JSON.stringify(bossSystem.snapshot()));
 
             // Rientro dopo una disconnessione: si torna nel proprio party
             const party = parties.get(partyOf.get(p.playerId));
@@ -1018,12 +1112,8 @@ wss.on("connection", (ws, req) => {
             partyKick(p, String(msg.playerId ?? ""));
         }
         else if (msg.type === "move") {
-            if (!Number.isInteger(msg.x) || !Number.isInteger(msg.y)) return;
-
-            p.x = msg.x;
-            p.y = msg.y;
-
-            broadcastPlayers();
+            if (p.lobby || !Number.isInteger(msg.x) || !Number.isInteger(msg.y)) return;
+            handleMove(p, msg.x, msg.y);
         }
         else if (msg.type === "fetch_zone") {
             const zk = parseZoneKey(msg.zoneKey);
@@ -1053,20 +1143,22 @@ wss.on("connection", (ws, req) => {
 
             const writeKey = `${cx},${cy}`;
             const color = isColor(msg.color) ? msg.color : null;
+            const gx = zk.zx * 3 + cx, gy = zk.zy * 3 + cy;
 
-            if (val === 0) {
-                // Rimozione (es. attacco di un boss)
-                delete zone.writes[writeKey];
-            } else {
-                // Solo il numero corretto, e mai sopra uno già scritto:
-                // un client modificato non può sporcare il mondo condiviso.
-                if (val !== solutionAtCell(zk.zx * 3 + cx, zk.zy * 3 + cy)) return;
-                if (zone.writes[writeKey]) return;
-                zone.writes[writeKey] = { val, color };
-            }
+            // Solo il numero corretto, mai sopra un numero iniziale o uno già scritto:
+            // un client modificato non può sporcare il mondo condiviso. Le cancellazioni
+            // (attacchi dei boss) le decide solo il server.
+            if (val !== solutionAtCell(gx, gy)) return;
+            if (revealedMask(zk.zx, zk.zy) & (1 << (cy * 3 + cx))) return;
+            if (zone.writes[writeKey]) return;
+            zone.writes[writeKey] = { val, color };
 
             // Le coordinate globali vengono ricavate dal client a partire da zona e cella locale.
             broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color });
+            bossSystem.onWrite(gx, gy, p);
+        }
+        else if (msg.type === "player_died") {
+            if (Number.isInteger(msg.x) && Number.isInteger(msg.y)) bossSystem.onPlayerDied(p, msg.x, msg.y);
         }
     });
 

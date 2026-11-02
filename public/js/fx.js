@@ -551,6 +551,34 @@
             sfx("move");
         },
 
+        // Spostato dal server: spinto da un altro giocatore o teletrasportato nel party
+        forcedMove(from, x, y, reason, by) {
+            if (!gameReady()) return;
+            if (reason === "push") {
+                ghost(from.x, from.y);
+                burst(x + 0.5, y + 0.5, 8, "#94b0c2", { speed: 3, g: 0 });
+                floatText(x, y, "SPINTO!", "dodge");
+                shake(0.18);
+                sfx("bump");
+            } else if (reason === "party") {
+                ghost(from.x, from.y, "dodge");
+                pillar(x + 0.5, y + 1, "#73eff7", 0.5, 0.9);
+                ring(x + 0.5, y + 0.5, "#73eff7", { r0: 0.3, r1: 1.8, max: 0.4, thick: 1.5 });
+                burst(x + 0.5, y + 0.5, 18, ["#73eff7", WHITE], { speed: 5, up: 2 });
+                flash("#73eff7", 0.25, 220);
+                banner("TELETRASPORTO", { cls: "small cyan", sub: by ? "ACCANTO A " + by.toUpperCase() : "", dur: 1200 });
+                sfx("dash");
+            }
+        },
+
+        // Hai spinto un altro giocatore
+        pushedOther() {
+            if (!gameReady()) return;
+            zoomPunch(0.015);
+            shake(0.1);
+            sfx("bump");
+        },
+
         bump() {
             if (!gameReady()) return;
             burst(player.x + 0.5, player.y + 0.5, 4, "#94b0c2", { speed: 2, g: 0, size: [1, 2], life: [0.15, 0.25] });
