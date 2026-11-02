@@ -176,6 +176,7 @@ function applyRemoteWrite(msg) {
 
     const el = createNum(gx, gy, msg.val, "written_other");
     if (el) el.style.color = displayColor;
+    window.FX?.remoteNumber(gx, gy, displayColor);
 
     // Hook per i boss: numero corretto inserito da un altro giocatore
     if (msg.val && window.bossManager?.onNumberPlaced) {
@@ -266,6 +267,11 @@ function highlight(overrideNum = null) {
             const idx = ly * 9 + lx;
             const el = gridCells[idx];
             el.classList.remove("hl", "same");
+
+            // Blocchi non accessibili: disegnati come muro anche dentro la finestra attiva
+            const wall = !isPlayableCell(ox + lx, oy + ly);
+            el.classList.toggle("wall", wall);
+            if (wall) continue;
 
             if (pInWin) {
                 const sameCol = (lx === plx);
@@ -517,7 +523,10 @@ function scheduleSave() {
     }, 3000);
 }
 function inLock(x, y) { return !lockRect || (x >= lockRect.x0 && x <= lockRect.x1 && y >= lockRect.y0 && y <= lockRect.y1); }
-function bump() { if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 }); }
+function bump() {
+    if (AN) AN({ targets: playerEl, translateX: [0, -3, 3, 0], duration: 160 });
+    window.FX?.bump();
+}
 function tryMove(dx, dy) {
     const nx = player.x + dx;
     const ny = player.y + dy;
@@ -549,6 +558,7 @@ function tryMove(dx, dy) {
             return;
         }
 
+        window.FX?.step(player.x, player.y, dx, dy);
         player.x = nx;
         player.y = ny;
         placePlayer();
@@ -566,6 +576,7 @@ function tryMove(dx, dy) {
         return;
     }
 
+    window.FX?.step(player.x, player.y, dx, dy);
     player.x = nx;
     player.y = ny;
     placePlayer();
@@ -659,6 +670,7 @@ function pressDigit(d) {
                 }
             }
 
+            window.FX?.dash(player.x, player.y, nx, ny);
             player.x = nx;
             player.y = ny;
             placePlayer();
@@ -708,15 +720,7 @@ function doWrite(z, li, d) {
     renderNotes(cx, cy);
 
     const el = createNum(cx, cy, d, "written");
-
-    if (AN) {
-        AN({
-            targets: el,
-            scale: [.3, 1.25, 1],
-            duration: 300,
-            easing: "easeOutBack"
-        });
-    }
+    window.FX?.numberPlaced(cx, cy, d, el);
 
     playerStats.stats.placedNumbers++;
     sendWrite(cx, cy, d);
@@ -844,24 +848,7 @@ function checkUnits() {
                 "gold"
             );
 
-            const els = [];
-            for (const [cx, cy] of cellsU) {
-                els.push(cellEls.get(cx + "," + cy));
-            }
-
-            if (AN) {
-                AN({
-                    targets: els.filter(Boolean),
-                    keyframes: [
-                        { scale: 1 },
-                        { scale: 1.03, backgroundColor: "rgba(255,255,255,0.2)" },
-                        { scale: 1 }
-                    ],
-                    duration: 400,
-                    easing: "easeOutQuad",
-                    delay: AN.stagger(10)
-                });
-            }
+            window.FX?.unitClear(t, cellsU);
         }
     }
 
@@ -921,9 +908,14 @@ function showWin() {
     if (!playerStats.isGuest) savePlayerData();
     const w = document.getElementById("win");
     document.getElementById("winTxt").textContent = "+150 XP · Livello " + level;
-    w.classList.remove("hide");
-    if (AN) AN({ targets: "#win .card", scale: [.6, 1], opacity: [0, 1], duration: 450, easing: "easeOutBack" });
-    setTimeout(() => w.classList.add("hide"), 3200);
+    window.FX?.sudokuComplete();
+    // La card arriva dopo la scritta "SUDOKU!" per non sovrapporsi all'effetto
+    const delay = window.FX ? 1300 : 0;
+    setTimeout(() => {
+        w.classList.remove("hide");
+        if (AN) AN({ targets: "#win .card", scale: [.6, 1], opacity: [0, 1], duration: 450, easing: "steps(6)" });
+    }, delay);
+    setTimeout(() => w.classList.add("hide"), 3200 + delay);
 }
 document.getElementById("againBtn").onclick = () => document.getElementById("win").classList.add("hide");
 
@@ -987,6 +979,7 @@ function gainXp(n) {
 }
 function levelUpFx() {
     toast("LIVELLO " + level + "!", "gold");
+    window.FX?.levelUp(level);
     if (AN) AN({
         targets: "#xpFill",
         backgroundColor: ["#a3e635", "#22c55e"],
@@ -995,21 +988,16 @@ function levelUpFx() {
     });
 }
 function wrongNumber() {
-    hp -= Math.round(maxHp * 0.15);
-    const v = document.getElementById("vignette");
-    if (AN) {
-        AN({ targets: v, keyframes: [{ opacity: 1 }, { opacity: 0, duration: 500 }], easing: "easeOutQuad" });
-        AN({ targets: stage, translateX: [0, -10, 10, -6, 6, 0], duration: 340 });
-        AN({ targets: hpFill, keyframes: [{ backgroundColor: "#ffffff" }, { backgroundColor: "#ef4444" }], duration: 500 });
-    } else {
-        v.style.opacity = 1; setTimeout(() => v.style.opacity = 0, 350);
-    }
+    const dmg = Math.round(maxHp * 0.15);
+    hp -= dmg;
+    window.FX?.wrong(player.x, player.y, dmg);
     toast("Numero errato! −HP", "bad");
     playerStats.stats.wrongPlacements++;
     if (hp <= 0) respawn();
     updateBars();
 }
 function respawn() {
+    window.FX?.ko();
     hp = maxHp;
     playerStats.deaths++;
 
@@ -1130,8 +1118,8 @@ function drawMinimap() {
             ctxMap.fillStyle = fillColor;
             ctxMap.fillRect(screenX, screenY, mapBlockSize - 2, mapBlockSize - 2);
 
-            ctxMap.strokeStyle = "#94a3b8";
-            ctxMap.lineWidth = 1;
+            ctxMap.strokeStyle = "#1a1c2c";
+            ctxMap.lineWidth = 2;
             ctxMap.strokeRect(screenX, screenY, mapBlockSize - 2, mapBlockSize - 2);
         }
     }
@@ -1143,10 +1131,11 @@ function drawMinimap() {
     const playerScreenX = mapCenterX + (playerBlockX - centerZx) * mapBlockSize;
     const playerScreenY = mapCenterY + (playerBlockY - centerZy) * mapBlockSize;
 
-    ctxMap.fillStyle = "#ef4444";
-    ctxMap.beginPath();
-    ctxMap.arc(playerScreenX, playerScreenY, Math.max(3, mapBlockSize / 5), 0, Math.PI * 2);
-    ctxMap.fill();
+    const ps = Math.round(Math.max(4, mapBlockSize / 4));
+    ctxMap.fillStyle = "#1a1c2c";
+    ctxMap.fillRect(playerScreenX - ps - 3, playerScreenY - ps - 3, ps * 2 + 6, ps * 2 + 6);
+    ctxMap.fillStyle = "#ffcd75";
+    ctxMap.fillRect(playerScreenX - ps, playerScreenY - ps, ps * 2, ps * 2);
 }
 mapWrap.addEventListener("wheel", e => {
     e.preventDefault();
@@ -1613,7 +1602,6 @@ function createPlayerIdBadge(idText) {
     if (!badge) {
         badge = document.createElement("div");
         badge.id = "playerIdBadge";
-        badge.style.cssText = "position:fixed; bottom:12px; right:12px; background:rgba(15,23,42,0.85); color:#94a3b8; padding:6px 12px; border-radius:8px; font-size:12px; font-family:monospace; border:1px solid #334155; z-index:1000; pointer-events:none;";
         document.body.appendChild(badge);
     }
     badge.textContent = `ID: ${idText}`;

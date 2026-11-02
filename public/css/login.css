@@ -2,93 +2,102 @@
     box-sizing: border-box;
     margin: 0;
     padding: 0;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 body {
-    background-color: #0f172a;
-    color: #f8fafc;
+    background-color: var(--night);
+    background-image:
+        linear-gradient(var(--ink) 4px, transparent 4px),
+        linear-gradient(90deg, var(--ink) 4px, transparent 4px),
+        linear-gradient(rgba(26, 28, 44, .5) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(26, 28, 44, .5) 2px, transparent 2px);
+    background-size: 132px 132px, 132px 132px, 44px 44px, 44px 44px;
+    animation: scrollGrid 6s steps(22) infinite;
+    color: var(--white);
+    font-family: var(--font-body);
     display: flex;
     justify-content: center;
     align-items: center;
     min-height: 100vh;
+    padding: 16px;
+}
+
+@keyframes scrollGrid {
+    to { background-position: 132px 132px, 132px 132px, 44px 44px, 44px 44px; }
 }
 
 .login-card {
-    background: #1e293b;
-    padding: 2.5rem;
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    padding: 36px 32px 32px;
     text-align: center;
     width: 100%;
-    max-width: 400px;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    animation: drop .5s steps(5) both;
+}
+
+@keyframes drop {
+    from { transform: translateY(-60px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
 }
 
 h1 {
-    font-size: 2rem;
-    color: #38bdf8;
-    margin-bottom: 0.5rem;
-    letter-spacing: 2px;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 24px;
+    line-height: 1.3;
+    color: var(--cyan);
+}
+
+h1 span {
+    display: block;
+    font-size: 40px;
+    color: var(--yellow);
 }
 
 .subtitle {
-    color: #94a3b8;
-    font-size: 0.9rem;
-    margin-bottom: 2rem;
+    font-size: 17px;
+    color: var(--mist);
+    margin-bottom: 8px;
 }
 
-.btn-google, .btn-primary {
-    width: 100%;
-    padding: 0.75rem 1rem;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s ease, transform 0.1s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-}
-
-.btn-google {
-    background-color: #ffffff;
-    color: #1e293b;
-}
-
-.btn-google:hover {
-    background-color: #f1f5f9;
-    transform: translateY(-2px);
-}
+.px-btn { width: 100%; font-size: 10px; line-height: 1.8; }
 
 .btn-google img {
     width: 20px;
     height: 20px;
 }
 
-.btn-primary {
-    background-color: #0284c7;
-    color: #ffffff;
-    margin-top: 1rem;
+h3 {
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
 }
 
-.btn-primary:hover {
-    background-color: #0369a1;
+#username-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 8px;
 }
 
 #username-input {
     width: 100%;
-    padding: 0.75rem;
-    border-radius: 8px;
-    border: 1px solid #334155;
-    background-color: #0f172a;
-    color: #fff;
-    margin-top: 1rem;
+    padding: 12px;
+    border: 0;
+    background-color: var(--ink);
+    color: var(--white);
+    font-family: var(--font-body);
+    font-size: 18px;
     outline: none;
+    box-shadow: inset 0 0 0 4px var(--slate);
 }
 
 #username-input:focus {
-    border-color: #38bdf8;
+    box-shadow: inset 0 0 0 4px var(--sky);
 }
 
 .hidden {

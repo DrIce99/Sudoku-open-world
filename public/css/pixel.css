@@ -1,0 +1,162 @@
+/* ============================================================
+   TEMA PIXEL CARTOONISH (condiviso da login / home / gioco)
+   Palette ispirata a "Sweetie 16", contorni spessi e ombre piene.
+   ============================================================ */
+:root {
+    --px: 4px;                 /* unità "pixel" dell'interfaccia */
+    --ink: #1a1c2c;            /* contorno cartoon */
+    --night: #29366f;
+    --plum: #5d275d;
+    --red: #b13e53;
+    --orange: #ef7d57;
+    --yellow: #ffcd75;
+    --lime: #a7f070;
+    --green: #38b764;
+    --teal: #257179;
+    --blue: #3b5dc9;
+    --sky: #41a6f6;
+    --cyan: #73eff7;
+    --white: #f4f4f4;
+    --mist: #94b0c2;
+    --slate: #566c86;
+    --deep: #333c57;
+
+    --font-title: "Press Start 2P", "Courier New", monospace;
+    --font-body: "Pixelify Sans", "Trebuchet MS", sans-serif;
+}
+
+/* Riquadro con contorno pixel (angoli "smussati" a scalino) + rilievo */
+.px-panel {
+    position: relative;
+    background: var(--deep);
+    color: var(--white);
+    box-shadow:
+        0 calc(var(--px) * -1) 0 0 var(--ink),
+        0 var(--px) 0 0 var(--ink),
+        calc(var(--px) * -1) 0 0 0 var(--ink),
+        var(--px) 0 0 0 var(--ink),
+        0 calc(var(--px) * 3) 0 0 rgba(26, 28, 44, .55),
+        inset 0 var(--px) 0 0 rgba(255, 255, 255, .18),
+        inset 0 calc(var(--px) * -1) 0 0 rgba(0, 0, 0, .28);
+}
+
+/* Bottone pixel: si "schiaccia" al click */
+.px-btn {
+    --btn-bg: var(--sky);
+    --btn-fg: var(--white);
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    border: 0;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: var(--font-title);
+    font-size: 14px;
+    letter-spacing: 1px;
+    color: var(--btn-fg);
+    background: var(--btn-bg);
+    padding: 16px 22px;
+    text-shadow: 2px 2px 0 var(--ink);
+    box-shadow:
+        0 calc(var(--px) * -1) 0 0 var(--ink),
+        0 var(--px) 0 0 var(--ink),
+        calc(var(--px) * -1) 0 0 0 var(--ink),
+        var(--px) 0 0 0 var(--ink),
+        0 calc(var(--px) * 2) 0 0 var(--ink),
+        inset 0 var(--px) 0 0 rgba(255, 255, 255, .35),
+        inset 0 calc(var(--px) * -2) 0 0 rgba(0, 0, 0, .3);
+    transform: translateY(0);
+    transition: transform .06s steps(2), filter .1s;
+    image-rendering: pixelated;
+}
+
+.px-btn:hover,
+.px-btn.is-selected {
+    filter: brightness(1.12);
+    transform: translateY(calc(var(--px) * -1));
+}
+
+.px-btn:active {
+    transform: translateY(var(--px));
+    box-shadow:
+        0 calc(var(--px) * -1) 0 0 var(--ink),
+        0 var(--px) 0 0 var(--ink),
+        calc(var(--px) * -1) 0 0 0 var(--ink),
+        var(--px) 0 0 0 var(--ink),
+        inset 0 var(--px) 0 0 rgba(0, 0, 0, .25);
+}
+
+.px-btn.green { --btn-bg: var(--green); }
+.px-btn.red { --btn-bg: var(--red); }
+.px-btn.yellow { --btn-bg: var(--yellow); --btn-fg: var(--ink); text-shadow: 2px 2px 0 rgba(255, 255, 255, .5); }
+.px-btn.white { --btn-bg: var(--white); --btn-fg: var(--ink); text-shadow: none; }
+.px-btn.ghost { --btn-bg: var(--deep); }
+
+/* Testo con contorno spesso stile cartoon */
+.px-outline {
+    text-shadow:
+        3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 3px 0 var(--ink), 0 -3px 0 var(--ink),
+        3px 3px 0 var(--ink), -3px 3px 0 var(--ink), 3px -3px 0 var(--ink), -3px -3px 0 var(--ink),
+        0 7px 0 var(--ink);
+}
+
+/* Barra a segmenti (HP / XP) */
+.px-bar {
+    position: relative;
+    height: 16px;
+    background: var(--ink);
+    box-shadow: 0 0 0 var(--px) var(--ink);
+    overflow: hidden;
+}
+
+.px-bar > .fill {
+    height: 100%;
+    box-shadow: inset 0 3px 0 0 rgba(255, 255, 255, .35), inset 0 -3px 0 0 rgba(0, 0, 0, .25);
+}
+
+.px-bar::after {
+    /* tacche dei segmenti */
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(90deg, transparent 0 10px, rgba(26, 28, 44, .7) 10px 12px);
+}
+
+.px-scanlines::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9999;
+    background: repeating-linear-gradient(0deg, rgba(0, 0, 0, .06) 0 2px, transparent 2px 4px);
+}
+
+kbd {
+    font-family: var(--font-title);
+    font-size: 8px;
+    padding: 3px 5px 2px;
+    background: var(--white);
+    color: var(--ink);
+    box-shadow: 0 0 0 2px var(--ink), 0 3px 0 2px var(--ink);
+    margin: 0 2px;
+}
+
+/* Bottone audio flottante */
+.sfx-toggle {
+    position: fixed;
+    z-index: 1200;
+    width: 48px;
+    height: 36px;
+    padding: 0;
+    font-size: 9px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .001ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}

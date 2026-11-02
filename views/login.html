@@ -2,29 +2,34 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Infinitedoku - Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/login.css">
     <!-- Firebase App & Auth SDK -->
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 </head>
-<body>
-    <div class="login-card">
-        <h1>INFINITEDOKU</h1>
+<body class="px-scanlines">
+    <div class="login-card px-panel">
+        <h1 class="px-outline">INFINITE<span>DOKU</span></h1>
         <p class="subtitle">Open World Sudoku Multiplayer</p>
 
         <div id="login-section">
-            <button id="google-login-btn" class="btn-google">
+            <button id="google-login-btn" class="btn-google px-btn white">
                 <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google">
                 Accedi con Google
             </button>
         </div>
-        <button id="guest-login-btn" class="btn-secondary">Gioca Offline (Senza Login)</button>
+        <button id="guest-login-btn" class="btn-secondary px-btn ghost">Gioca Offline (Senza Login)</button>
 
         <div id="username-section" class="hidden">
             <h3>Scegli il tuo Username</h3>
             <input type="text" id="username-input" placeholder="Min. 3 caratteri">
-            <button id="save-username-btn" class="btn-primary">Salva ed Entra</button>
+            <button id="save-username-btn" class="btn-primary px-btn green">Salva ed Entra</button>
         </div>
     </div>
 

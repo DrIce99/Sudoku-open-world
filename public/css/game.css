@@ -6,141 +6,130 @@
 
 /* Barra sottile Home/Username sopra al motore di gioco (style.css) */
 .game-hud {
-    height: 40px;
-    padding: 0 14px !important;
-}
-
-.game-hud .player-info {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.btn-back {
-    margin-right: 0 !important;
-    padding: 0.25rem 0.6rem !important;
-    font-size: 0.8rem;
-}
-
-/* Sposta in basso gli elementi del motore che altrimenti finirebbero
-   sotto la barra Home/Username in alto */
-#coordsHud,
-aside#tips,
-#lockBadge {
-    top: 50px !important;
-}
-
-body, html {
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-    background-color: #0f172a;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-}
-
-#game-container {
-    position: relative;
-    width: 100vw;
-    height: 100vh;
-}
-
-.game-hud {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
-    padding: 1rem 1.5rem;
+    height: 52px;
+    padding: 0 18px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(15, 23, 42, 0) 100%);
     pointer-events: none;
-    z-index: 10;
-    color: #fff;
+    z-index: 21;
+    color: var(--white);
 }
 
 .game-hud * {
     pointer-events: auto;
 }
 
+.game-hud .player-info {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
 .btn-back {
-    color: #38bdf8;
-    text-decoration: none;
-    font-weight: bold;
-    margin-right: 1rem;
-    padding: 0.4rem 0.8rem;
-    background: #1e293b;
-    border-radius: 6px;
-    border: 1px solid #334155;
+    padding: 8px 12px;
+    font-size: 9px;
 }
 
-.btn-back:hover {
-    background: #334155;
+#hud-username {
+    padding: 6px 10px;
+    font-family: var(--font-title);
+    font-size: 9px;
+    background: var(--ink);
+    color: var(--yellow);
 }
 
-#gameCanvas {
+#sfxBtn {
+    top: 10px;
+    right: 18px;
+}
+
+/* Sposta in basso gli elementi del motore che altrimenti finirebbero
+   sotto la barra Home/Username in alto */
+#coordsHud {
+    top: 66px !important;
+}
+
+#lockBadge {
+    top: 176px !important;
+    left: 18px !important;
+    transform: none !important;
+}
+
+aside#tips {
+    top: 66px !important;
+}
+
+body, html {
     width: 100%;
     height: 100%;
-    display: block;
-    background-color: #0f172a;
-}
-
-#controls-overlay {
-    position: absolute;
-    bottom: 1rem;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(30, 41, 59, 0.85);
-    color: #94a3b8;
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    pointer-events: none;
-    backdrop-filter: blur(4px);
+    overflow: hidden;
 }
 
 /* Contour dell'area del Boss (9x9 celle / 3x3 blocchi) */
 .boss-area-outline {
     position: absolute;
     pointer-events: none;
-    border: 3px dashed #ef4444;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), inset 0 0 20px rgba(239, 68, 68, 0.2);
-    animation: bossPulse 2s infinite alternate ease-in-out;
+    border: 6px dashed #e43b44;
+    box-shadow: 0 0 0 4px var(--ink), inset 0 0 0 4px var(--ink), inset 0 0 0 9999px rgba(177, 62, 83, .08);
+    animation: bossPulse 1s steps(2) infinite;
     z-index: 50;
 }
 
 @keyframes bossPulse {
-    from { border-color: #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
-    to { border-color: #f87171; box-shadow: 0 0 30px rgba(248, 113, 113, 0.7); }
+    from { border-color: #e43b44; }
+    to { border-color: var(--yellow); }
 }
 
-/* Preavviso Attacco Boss (Telegraphing) */
+/* Preavviso Attacco Boss (Telegraphing): strisce di pericolo + riempimento a tempo */
 .boss-attack-cell {
     position: absolute;
     pointer-events: none;
-    background-color: rgba(239, 68, 68, 0.35);
-    border: 2px solid #dc2626;
-    animation: attackWarn 0.4s infinite alternate;
+    background: repeating-linear-gradient(-45deg, rgba(228, 59, 68, .55) 0 8px, rgba(26, 28, 44, .35) 8px 16px);
+    background-size: 22.63px 22.63px;
+    box-shadow: inset 0 0 0 3px #e43b44, inset 0 0 0 5px var(--ink);
+    animation: hazardScroll .4s linear infinite, attackWarn .3s steps(2) infinite;
     z-index: 60;
 }
 
-@keyframes attackWarn {
-    from { opacity: 0.4; transform: scale(0.95); }
-    to { opacity: 0.95; transform: scale(1.0); }
+/* barra che si riempie dal basso: quando è piena, il colpo cade */
+.boss-attack-cell::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    right: 5px;
+    bottom: 5px;
+    height: 0;
+    background: rgba(255, 205, 117, .75);
+    animation: teleFill var(--tele, 1800ms) steps(9) forwards;
 }
+
+@keyframes hazardScroll { to { background-position: 22.63px 0; } }
+
+@keyframes attackWarn {
+    from { opacity: .65; }
+    to { opacity: 1; }
+}
+
+@keyframes teleFill { to { height: calc(100% - 10px); } }
 
 /* HUD della Barra della Vita del Boss (In alto al centro, non copre numeri) */
 #boss-hud-container {
     position: fixed;
-    top: 15px;
+    top: 6px;
     left: 50%;
     transform: translateX(-50%);
-    width: 380px;
-    background: rgba(15, 23, 42, 0.9);
-    border: 2px solid #ef4444;
-    border-radius: 12px;
-    padding: 8px 14px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+    width: min(420px, 52vw);
+    background: var(--deep);
+    padding: 10px 14px 12px;
+    box-shadow:
+        0 -4px 0 0 var(--ink), 0 4px 0 0 var(--ink), -4px 0 0 0 var(--ink), 4px 0 0 0 var(--ink),
+        0 10px 0 0 rgba(26, 28, 44, .5),
+        inset 0 4px 0 0 rgba(255, 255, 255, .14);
     z-index: 1000;
     display: none;
     flex-direction: column;
@@ -149,45 +138,67 @@ body, html {
 }
 
 #boss-hud-title {
-    color: #f87171;
-    font-size: 14px;
-    font-weight: bold;
+    color: #ff6b6b;
+    font-family: var(--font-title);
+    font-size: 10px;
     letter-spacing: 1px;
-    margin-bottom: 4px;
+    margin-bottom: 8px;
     text-transform: uppercase;
+    text-shadow: 2px 2px 0 var(--ink);
 }
 
 .boss-hp-bar-bg {
     width: 100%;
-    height: 14px;
-    background: #334155;
-    border-radius: 7px;
+    height: 16px;
+    background: var(--ink);
+    box-shadow: 0 0 0 3px var(--ink);
     overflow: hidden;
     position: relative;
+}
+
+.boss-hp-bar-bg::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0 10px, rgba(26, 28, 44, .75) 10px 12px);
 }
 
 .boss-hp-bar-fill {
     height: 100%;
     width: 100%;
-    background: linear-gradient(90deg, #dc2626, #f87171);
-    transition: width 0.3s ease-out;
+    background: #e43b44;
+    box-shadow: inset 0 4px 0 rgba(255, 255, 255, .3), inset 0 -4px 0 rgba(0, 0, 0, .25);
+    transition: width 0.3s steps(5);
 }
 
 /* Indicatore/Puntatore di Prossimità Boss */
 #boss-proximity-pointer {
     position: fixed;
-    width: 40px;
-    height: 40px;
-    background: rgba(239, 68, 68, 0.85);
-    border-radius: 50%;
     display: none;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
-    color: #ffffff;
-    font-weight: bold;
-    font-size: 20px;
-    box-shadow: 0 0 15px rgba(239, 68, 68, 0.8);
-    z-index: 999;
     pointer-events: none;
-    transform-origin: center center;
+    z-index: 999;
+    transform: translate(-50%, -50%);
 }
+
+#boss-proximity-pointer .boss-arrow {
+    font-family: var(--font-title);
+    font-size: 22px;
+    line-height: 1;
+    color: #ff4d5e;
+    text-shadow: 3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 3px 0 var(--ink), 0 -3px 0 var(--ink);
+    animation: blinkPtr .5s steps(1) infinite;
+}
+
+#boss-proximity-pointer .boss-dist {
+    margin-top: 6px;
+    padding: 2px 6px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--white);
+    background: var(--red);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+@keyframes blinkPtr { 50% { opacity: .45; } }

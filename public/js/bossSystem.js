@@ -61,6 +61,23 @@ class BaseBoss {
         if (this.hp <= 0) this.onDeath();
     }
 
+    // Preavviso visivo (Telegraphing) delle celle che verranno colpite tra `ms` millisecondi.
+    // Restituisce gli elementi da rimuovere e l'handle FX da passare a FX.strike().
+    telegraph(targetCells, ms) {
+        const els = targetCells.map(cell => {
+            const el = document.createElement("div");
+            el.className = "boss-attack-cell";
+            el.style.left = (cell.x * CELL) + "px";
+            el.style.top = (cell.y * CELL) + "px";
+            el.style.width = CELL + "px";
+            el.style.height = CELL + "px";
+            el.style.setProperty("--tele", ms + "ms");
+            worldEl.appendChild(el);
+            return el;
+        });
+        return { els, fx: window.FX?.telegraph(targetCells, ms) };
+    }
+
     heal(amount) {
         this.hp = Math.min(this.maxHp, this.hp + amount);
     }
@@ -68,6 +85,7 @@ class BaseBoss {
     onDeath() {
         this.active = false;
         this.destroyOutline();
+        window.FX?.bossDefeated(this);
         toast(`BOSS SCONFITTO! (+500 XP)`, "gold");
         gainXp(500);
     }
@@ -145,29 +163,19 @@ class SudokuHpBoss extends BaseBoss {
         }
 
         // FASE 1: Preavviso visivo (Telegraphing)
-        const warnElements = [];
-        targetCells.forEach(cell => {
-            const el = document.createElement("div");
-            el.className = "boss-attack-cell";
-            el.style.left = (cell.x * CELL) + "px";
-            el.style.top = (cell.y * CELL) + "px";
-            el.style.width = CELL + "px";
-            el.style.height = CELL + "px";
-            worldEl.appendChild(el);
-            warnElements.push(el);
-        });
+        const tele = this.telegraph(targetCells, 1800);
 
         // FASE 2: Esecuzione dell'attacco dopo 1.8 secondi
         setTimeout(() => {
-            warnElements.forEach(el => el.remove());
+            tele.els.forEach(el => el.remove());
 
             // ✅ Se il player è sopra una delle celle attaccate, subisce danno
-            if (
+            const hit =
                 typeof player !== "undefined" &&
-                targetCells.some(c => c.x === player.x && c.y === player.y)
-            ) {
-                this.hitPlayerByAttack();
-            }
+                targetCells.some(c => c.x === player.x && c.y === player.y);
+
+            window.FX?.strike(tele.fx, hit);
+            if (hit) this.hitPlayerByAttack();
 
             targetCells.forEach(cell => {
                 this.strikeCell(cell.x, cell.y);
@@ -184,48 +192,7 @@ class SudokuHpBoss extends BaseBoss {
         hp -= dmg;
 
         toast(`Colpito dall'attacco del Boss! -${dmg} HP`, "bad");
-
-        // Effetto visivo simile a quando sbagli numero
-        const v = document.getElementById("vignette");
-        const stageEl = document.getElementById("stage");
-        const hpFillEl = document.getElementById("hpFill");
-
-        if (typeof AN !== "undefined" && AN) {
-            if (v) {
-                AN({
-                    targets: v,
-                    keyframes: [
-                        { opacity: 1 },
-                        { opacity: 0, duration: 500 }
-                    ],
-                    easing: "easeOutQuad"
-                });
-            }
-
-            if (stageEl) {
-                AN({
-                    targets: stageEl,
-                    translateX: [0, -10, 10, -6, 6, 0],
-                    duration: 340
-                });
-            }
-
-            if (hpFillEl) {
-                AN({
-                    targets: hpFillEl,
-                    keyframes: [
-                        { backgroundColor: "#ffffff" },
-                        { backgroundColor: "#ef4444" }
-                    ],
-                    duration: 500
-                });
-            }
-        } else {
-            if (v) {
-                v.style.opacity = 1;
-                setTimeout(() => v.style.opacity = 0, 350);
-            }
-        }
+        window.FX?.playerHit(dmg);
 
         if (hp <= 0) {
             respawn();
@@ -327,6 +294,7 @@ class SudokuHpBoss extends BaseBoss {
 
         // Danno extra quando viene completata una riga / colonna / box 3x3 nella sua area
         this.takeDamage(this.unitBonusDamage || 120);
+        window.FX?.bossHurt(this.unitBonusDamage || 120);
     }
 
     onWindowCompleted(windowKey, zx, zy) {
@@ -335,6 +303,7 @@ class SudokuHpBoss extends BaseBoss {
         // La finestra 9x9 del boss è centrata su (bx + 1, by + 1)
         if (zx === this.bx + 1 && zy === this.by + 1) {
             this.takeDamage(this.windowBonusDamage || 350);
+            window.FX?.bossHurt(this.windowBonusDamage || 350);
         }
     }
 }
@@ -380,36 +349,6 @@ class BossManager {
             document.body.appendChild(pointer);
         }
 
-        // CSS della freccia, se non è già stato iniettato
-        if (!document.getElementById("bossPointerStyle")) {
-            const st = document.createElement("style");
-            st.id = "bossPointerStyle";
-            st.textContent = `
-            #boss-proximity-pointer {
-                position: fixed;
-                display: none;
-                flex-direction: column;
-                align-items: center;
-                pointer-events: none;
-                z-index: 999;
-                color: #ff4d5e;
-                text-shadow: 0 0 8px rgba(255, 77, 94, .7);
-                font-family: monospace;
-            }
-
-            #boss-proximity-pointer .boss-arrow {
-                font-size: 26px;
-                line-height: 1;
-            }
-
-            #boss-proximity-pointer .boss-dist {
-                font-size: 11px;
-                margin-top: 2px;
-                letter-spacing: 1px;
-            }
-        `;
-            document.head.appendChild(st);
-        }
     }
 
     spawnBoss(type = null, bx = null, by = null) {
@@ -444,6 +383,7 @@ class BossManager {
 
         if (boss) {
             this.bosses.set(id, boss);
+            window.FX?.bossWarning(boss.name);
             toast(`Un nuovo Boss è apparso: ${boss.name}!`, "bad");
         }
 
@@ -565,6 +505,7 @@ class BossManager {
         if (currentBoss) {
             if (this.forcedCameraBoss !== currentBoss) {
                 this.forcedCameraBoss = currentBoss;
+                window.FX?.bossIntro(currentBoss);
 
                 // Genera subito tutti i 9 blocchi 3x3 dell'area boss
                 for (let dy = 0; dy < 3; dy++) {
@@ -930,6 +871,7 @@ class SurvivalTrialBoss extends BaseBoss {
 
         // Completamento riga / colonna / box 3x3 toglie tempo extra
         this.reduceTime(this.unitTimeReduction);
+        window.FX?.bossHurt(120);
     }
 
     onWindowCompleted(windowKey, zx, zy) {
@@ -938,6 +880,7 @@ class SurvivalTrialBoss extends BaseBoss {
         // La finestra 9x9 del boss è centrata su (bx + 1, by + 1)
         if (zx === this.bx + 1 && zy === this.by + 1) {
             this.reduceTime(this.windowTimeReduction);
+            window.FX?.bossHurt(350);
         }
     }
 
@@ -948,6 +891,7 @@ class SurvivalTrialBoss extends BaseBoss {
         this.active = false;
         this.destroyOutline();
 
+        window.FX?.trialFailed();
         toast("Survival Trial fallita!", "bad");
     }
 
@@ -957,6 +901,7 @@ class SurvivalTrialBoss extends BaseBoss {
         this.active = false;
         this.destroyOutline();
 
+        window.FX?.bossDefeated(this);
         toast("SURVIVAL TRIAL SUPERATA! (+500 XP)", "gold");
         gainXp(500);
     }
@@ -972,32 +917,23 @@ class SurvivalTrialBoss extends BaseBoss {
             : this.generateDrunkardWalkPattern();
 
         // Telegraph visivo
-        const warnElements = [];
-        targetCells.forEach(cell => {
-            const el = document.createElement("div");
-            el.className = "boss-attack-cell";
-            el.style.left = (cell.x * CELL) + "px";
-            el.style.top = (cell.y * CELL) + "px";
-            el.style.width = CELL + "px";
-            el.style.height = CELL + "px";
-            worldEl.appendChild(el);
-            warnElements.push(el);
-        });
+        const tele = this.telegraph(targetCells, this.telegraphTime || 1400);
 
         setTimeout(() => {
-            warnElements.forEach(el => el.remove());
+            tele.els.forEach(el => el.remove());
 
             if (!this.active || this.failed) {
+                window.FX?.strike(tele.fx, false);
                 this.isAttacking = false;
                 return;
             }
 
-            if (
+            const hit =
                 typeof player !== "undefined" &&
-                targetCells.some(c => c.x === player.x && c.y === player.y)
-            ) {
-                this.hitPlayerByAttack();
-            }
+                targetCells.some(c => c.x === player.x && c.y === player.y);
+
+            window.FX?.strike(tele.fx, hit);
+            if (hit) this.hitPlayerByAttack();
 
             // Rimuove i numeri scritti nelle celle attaccate
             targetCells.forEach(cell => {
@@ -1067,47 +1003,7 @@ class SurvivalTrialBoss extends BaseBoss {
         hp -= dmg;
 
         toast(`Colpito dalla Survival Trial! -${dmg} HP`, "bad");
-
-        const v = document.getElementById("vignette");
-        const stageEl = document.getElementById("stage");
-        const hpFillEl = document.getElementById("hpFill");
-
-        if (typeof AN !== "undefined" && AN) {
-            if (v) {
-                AN({
-                    targets: v,
-                    keyframes: [
-                        { opacity: 1 },
-                        { opacity: 0, duration: 500 }
-                    ],
-                    easing: "easeOutQuad"
-                });
-            }
-
-            if (stageEl) {
-                AN({
-                    targets: stageEl,
-                    translateX: [0, -10, 10, -6, 6, 0],
-                    duration: 340
-                });
-            }
-
-            if (hpFillEl) {
-                AN({
-                    targets: hpFillEl,
-                    keyframes: [
-                        { backgroundColor: "#ffffff" },
-                        { backgroundColor: "#ef4444" }
-                    ],
-                    duration: 500
-                });
-            }
-        } else {
-            if (v) {
-                v.style.opacity = 1;
-                setTimeout(() => v.style.opacity = 0, 350);
-            }
-        }
+        window.FX?.playerHit(dmg);
 
         if (hp <= 0) {
             respawn();

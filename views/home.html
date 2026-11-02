@@ -2,43 +2,86 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Infinitedoku - Home</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/home.css">
 </head>
-<body>
+<body class="px-scanlines">
 
-    <div class="home-container">
-        <!-- Header con profilo Player -->
-        <div class="player-header">
-            <h2 id="player-username">Caricamento...</h2>
-            <div id="player-id"></div>
+    <!-- Sfondo animato: mondo sudoku infinito in pixel art -->
+    <canvas id="bg"></canvas>
+
+    <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
+
+    <main class="home">
+        <!-- LOGO -->
+        <header class="logo" aria-label="Infinitedoku">
+            <h1 class="logo-title">
+                <span class="logo-line" data-text="INFINITE"></span>
+                <span class="logo-line big" data-text="DOKU"></span>
+            </h1>
+            <div class="ribbon"><span>OPEN WORLD SUDOKU</span></div>
+        </header>
+
+        <div class="columns">
+            <!-- Profilo giocatore -->
+            <section class="px-panel card player-card">
+                <div class="avatar-frame"><canvas id="avatar" width="8" height="8"></canvas></div>
+                <div class="player-meta">
+                    <h2 id="player-username">Caricamento...</h2>
+                    <div id="player-id" class="tag">#----</div>
+                    <div class="lv-row">
+                        <span class="lv-badge">LV <strong id="player-level">1</strong></span>
+                        <div class="px-bar xp"><div id="xp-fill" class="fill"></div></div>
+                    </div>
+                    <div id="xp-text" class="xp-text">0 / 100 XP</div>
+                </div>
+            </section>
+
+            <!-- Menu principale (navigabile con frecce + Invio) -->
+            <nav class="menu" id="menu">
+                <a href="/game" class="px-btn green menu-item play" data-sfx="confirm">
+                    <span class="cursor">▶</span>ENTRA NEL MONDO
+                </a>
+                <a href="/logout" class="px-btn red menu-item" data-sfx="select">
+                    <span class="cursor">▶</span>LOG OUT
+                </a>
+            </nav>
+
+            <!-- Statistiche -->
+            <section class="px-panel card stats-card">
+                <h3>STATISTICHE</h3>
+                <div class="stats-grid">
+                    <div class="stat">
+                        <canvas class="icon" data-icon="trophy" width="10" height="10"></canvas>
+                        <strong id="stat-completed">0</strong>
+                        <span>Sudoku completati</span>
+                    </div>
+                    <div class="stat">
+                        <canvas class="icon" data-icon="tile" width="10" height="10"></canvas>
+                        <strong id="stat-placed">0</strong>
+                        <span>Cifre inserite</span>
+                    </div>
+                    <div class="stat">
+                        <canvas class="icon" data-icon="skull" width="10" height="10"></canvas>
+                        <strong id="stat-wrong">0</strong>
+                        <span>Errori commessi</span>
+                    </div>
+                </div>
+            </section>
         </div>
 
-        <!-- Menu Principale -->
-        <div class="menu-container">
-            <a href="/game" class="btn-menu play">ENTRA NEL MONDO (PLAY)</a>
+        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE</p>
+    </main>
 
-            <!-- Sezione Statistiche Player -->
-            <div class="stats-card">
-                <h3>Le tue Statistiche</h3>
-                <div class="stat-item">
-                    <span>Sudoku Completati:</span>
-                    <strong id="stat-completed">0</strong>
-                </div>
-                <div class="stat-item">
-                    <span>Cifre Inserite:</span>
-                    <strong id="stat-placed">0</strong>
-                </div>
-                <div class="stat-item">
-                    <span>Errori commessi:</span>
-                    <strong id="stat-wrong">0</strong>
-                </div>
-            </div>
+    <!-- Transizione a quadrati pixel verso il gioco -->
+    <canvas id="wipe"></canvas>
 
-            <a href="/logout" class="btn-menu logout">LOG OUT</a>
-        </div>
-    </div>
-
+    <script src="/js/sfx.js"></script>
     <script src="/js/home.js"></script>
 </body>
 </html>
