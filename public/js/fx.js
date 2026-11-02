@@ -405,6 +405,9 @@
                     alertEl.className = "fx-alert";
                     alertEl.textContent = "!";
                 }
+                // con il Parry (classe 7) l'avviso ricorda di premere Spazio
+                alertEl.textContent = window.Abilities?.key() === "7a" ? "PARA!" : "!";
+                alertEl.classList.toggle("wide", alertEl.textContent.length > 1);
                 playerEl.appendChild(alertEl);
                 zoomPunch(0.03);
             } else if (alertEl) {
@@ -477,7 +480,7 @@
         shake, zoomPunch, flash, banner, floatText, hitstop, slowmo,
 
         // Numero corretto inserito
-        numberPlaced(cx, cy, d, el) {
+        numberPlaced(cx, cy, d, el, rewarded = true) {
             const now = performance.now();
             const c = comboHit(now);
             const col = DIGIT[d] || YELLOW;
@@ -502,7 +505,8 @@
                 ], { duration: 340, easing: "steps(8, end)" });
             }
 
-            floatText(cx, cy, "+5 XP", "xp");
+            // nessun "+5 XP" se la cella era già stata premiata (numero riscritto dopo un attacco)
+            if (rewarded) floatText(cx, cy, "+5 XP", "xp");
             zoomPunch(0.01 + heat * 0.002);
             if (c >= 5) shake(0.12 + heat * 0.01);
             sfx("place", { pitch: 1 + Math.min(c - 1, 12) * 0.06 });
@@ -752,6 +756,110 @@
             const hud = document.getElementById("boss-hud-container");
             pulseClass(hud, "fx-boss-hurt", 400);
             shake(Math.min(0.5, 0.15 + amount / 1000));
+        },
+
+        // Danno inflitto al boss (abilità, righe completate...): numero sopra l'arena
+        bossDamage(boss, amount, source) {
+            if (!gameReady() || !(amount > 0)) return;
+            const cx = boss.bx * 3 + 3 + Math.floor(Math.random() * 3), cy = boss.by * 3 + 3 + Math.floor(Math.random() * 3);
+            floatText(cx, cy, `-${amount}`, "bossdmg" + (amount >= 50 ? " big" : ""));
+            if (amount >= 20) burst(cx + 0.5, cy + 0.5, 8, [YELLOW, WHITE, RED], { speed: 4, up: 2 });
+        },
+
+        bossStunned(boss, by, inside) {
+            if (!gameReady()) return;
+            const cx = boss.bx * 3 + 4.5, cy = boss.by * 3 + 4.5;
+            ring(cx, cy, "#73eff7", { r0: 1, r1: 6, max: 0.6, thick: 2 });
+            burst(cx, cy, 30, ["#73eff7", WHITE, "#41a6f6"], { speed: 6, g: 0 });
+            if (inside) {
+                flash("#73eff7", 0.35, 300);
+                zoomPunch(0.04);
+                banner("CONGELATO!", { cls: "cyan", sub: by ? "DA " + by.toUpperCase() : "", dur: 1300 });
+            }
+            sfx("dodge");
+        },
+
+        shieldGained(amount) {
+            if (!gameReady()) return;
+            ring(player.x + 0.5, player.y + 0.5, "#f27ab3", { r0: 0.4, r1: 1.6, max: 0.4, square: false, thick: 2 });
+            floatText(player.x, player.y, `SCUDO +${amount}`, "shield");
+            sfx("confirm");
+        },
+
+        healed(amount, from) {
+            if (!gameReady()) return;
+            floatText(player.x, player.y, `+${amount} HP`, "heal");
+            burst(player.x + 0.5, player.y + 0.5, 10, ["#38b764", "#a7f070", WHITE], { speed: 3, up: 3, g: -2 });
+        },
+
+        // Abilità usate da un giocatore (mine = da te)
+        abilityFx(msg, mine) {
+            if (!gameReady()) return;
+            if (msg.kind === "jump" || msg.kind === "blink" || msg.kind === "portal") {
+                const col = msg.kind === "portal" ? "#b55ed6" : msg.kind === "blink" ? "#14b8a6" : "#b55ed6";
+                ghost(msg.from.x, msg.from.y, "dodge");
+                ring(msg.from.x + 0.5, msg.from.y + 0.5, col, { r0: 0.6, r1: 0.1, max: 0.25, thick: 2 });
+                ring(msg.to.x + 0.5, msg.to.y + 0.5, col, { r0: 0.2, r1: 1.6, max: 0.35, thick: 2 });
+                burst(msg.to.x + 0.5, msg.to.y + 0.5, 14, [col, WHITE], { speed: 4, g: 0 });
+                if (mine) { zoomPunch(0.03); sfx("dash"); }
+                return;
+            }
+            if (msg.kind === "heal") {
+                msg.cells.forEach((c, i) => setTimeout(() => {
+                    pillar(c.x + 0.5, c.y + 1, "#38b764", 0.35, 0.8);
+                    burst(c.x + 0.5, c.y + 0.5, 12, ["#38b764", "#a7f070", WHITE], { speed: 4, up: 3 });
+                }, i * 70));
+                if (mine) { banner("CURA!", { cls: "small", sub: `${msg.cells.length} NUMERI`, dur: 1000 }); sfx("levelup"); }
+                return;
+            }
+            if (msg.kind === "parry") {
+                ring(msg.x + 0.5, msg.y + 0.5, WHITE, { r0: 0.3, r1: 3, max: 0.4, square: false, thick: 3 });
+                burst(msg.x + 0.5, msg.y + 0.5, 30, [WHITE, YELLOW, "#73eff7"], { speed: 8, g: 0 });
+                if (mine) {
+                    hitstop(140);
+                    flash(WHITE, 0.6, 200);
+                    shake(0.5);
+                    speedLines(0.5, YELLOW);
+                    banner("PARRY!", { cls: "gold", sub: "COLPO RISPEDITO", dur: 1200 });
+                    sfx("dodge");
+                }
+                return;
+            }
+            if (msg.kind === "counter") {
+                const r = msg.rect;
+                for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) cellFlash(x, y, YELLOW, ((x - r.x0) + (y - r.y0)) * 0.02, 0.35);
+                if (mine) { banner("CONTRATTACCO!", { cls: "gold", dur: 1100 }); shake(0.4); sfx("boom"); }
+                return;
+            }
+            if (msg.kind === "fury") {
+                burst(msg.x + 0.5, msg.y + 0.5, 24, [RED, "#ff8a8a", YELLOW], { speed: 6, up: 2 });
+                ring(msg.x + 0.5, msg.y + 0.5, RED, { r0: 0.4, r1: 2.2, max: 0.4, thick: 2 });
+                if (mine) {
+                    flash(RED, 0.3, 250);
+                    shake(0.3);
+                    banner("FURIA!", { cls: "bad", dur: 1000 });
+                    sfx("hit");
+                }
+            } else if (msg.kind === "sacrifice") {
+                msg.cells.forEach((c, i) => setTimeout(() => {
+                    pillar(c.x + 0.5, c.y + 1, "#ef7d57", 0.35, 0.8);
+                    burst(c.x + 0.5, c.y + 0.5, 14, ["#ef7d57", YELLOW, RED], { speed: 6, up: 3 });
+                    ring(c.x + 0.5, c.y + 0.5, "#ef7d57", { r0: 0.3, r1: 1.4, max: 0.3, thick: 1.5 });
+                    if (mine) shake(0.15);
+                }, i * 70));
+                if (mine) { banner("SACRIFICIO!", { cls: "gold", sub: `${msg.cells.length} NUMERI`, dur: 1100 }); sfx("boom"); }
+            } else if (msg.kind === "release") {
+                ring(msg.x + 0.5, msg.y + 0.5, YELLOW, { r0: 0.5, r1: 7, max: 0.7, thick: 3 });
+                burst(msg.x + 0.5, msg.y + 0.5, 40, [YELLOW, "#ef7d57", WHITE], { speed: 8, up: 2 });
+                if (mine) {
+                    hitstop(100);
+                    flash(YELLOW, 0.4, 300);
+                    shake(0.6);
+                    speedLines(0.5, YELLOW);
+                    banner("RILASCIO!", { cls: "gold", sub: `${msg.amount} DANNI`, dur: 1200 });
+                    sfx("boom");
+                }
+            }
         },
 
         bossDefeated(boss) {

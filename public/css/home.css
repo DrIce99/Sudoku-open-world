@@ -260,6 +260,35 @@ body {
     transition: width 1.2s steps(20);
 }
 
+.class-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 3px solid var(--ink);
+    font-family: var(--font-title);
+    font-size: 9px;
+}
+
+#player-class {
+    color: var(--cls, var(--mist));
+    text-shadow: 2px 2px 0 var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#player-gems {
+    flex: none;
+    color: var(--cyan);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.menu-item.classes-item {
+    --btn-bg: #8b4fc2;
+}
+
 .xp-text {
     margin-top: 8px;
     font-size: 14px;
@@ -333,6 +362,9 @@ body {
     grid-template-columns: repeat(3, 1fr);
     gap: 18px;
 }
+
+/* statistiche da combattente (boss / survival) */
+.stat.fighter { background: #3a2a4d; }
 
 .stat {
     display: grid;

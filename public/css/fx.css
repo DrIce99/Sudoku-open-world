@@ -150,6 +150,12 @@
 .fx-float.dmg { color: #ff6b6b; font-size: calc(var(--cell) * .3); }
 .fx-float.dmg.big { font-size: calc(var(--cell) * .48); }
 .fx-float.dodge { color: var(--cyan); }
+.fx-float.gem { color: var(--cyan); font-size: calc(var(--cell) * .2); }
+.fx-float.shield { color: #f27ab3; }
+.fx-float.heal { color: var(--lime); }
+.fx-alert.wide { width: auto; padding: 0 6px; font-size: calc(var(--cell) * .2); }
+.fx-float.bossdmg { color: var(--yellow); font-size: calc(var(--cell) * .28); }
+.fx-float.bossdmg.big { color: var(--orange); font-size: calc(var(--cell) * .45); }
 
 @keyframes floatUp {
     0% { transform: translate(-50%, 10px) scale(.4); opacity: 0; }

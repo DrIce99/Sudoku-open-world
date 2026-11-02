@@ -5,9 +5,11 @@ import { fileURLToPath } from "url";
 import session from "express-session";
 import { WebSocketServer } from "ws";
 import { randomUUID } from "crypto";
-import { auth, db, getPlayerData, updatePlayerData, serverTimestamp } from "./firebase.js";
+import { auth, db, getPlayerData, updatePlayerData, serverTimestamp, increment } from "./firebase.js";
 import { WORLD_SEED, isPlayableZone, solutionAtCell, revealedMask } from "./worldgen.js";
 import { createBossSystem } from "./bossServer.js";
+import { createAbilitySystem } from "./abilities.js";
+import { CLASS_CATALOG, PULL_COST, TEN_PULL_COST, variantKey, findVariant, levelFromCopies, rollPull } from "./classes.js";
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
@@ -118,6 +120,10 @@ function normalizeProgress(data) {
     delete clean.friends;
     delete clean.friendRequests;
     delete clean.friendRequestsSent;
+    // Collezione e tempi delle classi hanno la loro API (/api/classes)
+    delete clean.collection;
+    delete clean.classTime;
+    clean.wallet = { currency: Math.max(0, Math.floor(Number(clean.wallet?.currency) || 0)) };
 
     return clean;
 }
@@ -370,6 +376,7 @@ app.post("/api/save-progress", requireAuth, async (req, res) => {
 
         if (Object.keys(update).length) {
             await updatePlayerData(req.session.userId, update);
+            await updateGeneralLeaderboard(req, update);
         }
 
         res.json({ status: "success" });
@@ -414,6 +421,7 @@ app.post("/api/save-stats", requireAuth, async (req, res) => {
     try {
         if (Object.keys(update).length) {
             await updatePlayerData(req.session.userId, update);
+            await updateGeneralLeaderboard(req, update);
         }
         res.status(204).end();
     } catch (err) {
@@ -517,6 +525,106 @@ function makeFriends(a, b) {
 }
 
 const listOf = obj => Object.entries(obj || {}).map(([uid, v]) => ({ uid, ...v }));
+
+// ==================== CLASSIFICHE ====================
+// Ogni classifica ha un suo nodo, aggiornato quando cambiano i dati che la riguardano:
+//   leaderboard/general/<uid>  = { playerId, username, level, xp, completedSudokus, placedNumbers }
+//                                (aggiornata dai salvataggi del client)
+//   leaderboard/fighters/<uid> = { playerId, username, bossKills, trialWins, arenaNumbers }
+//                                (aggiornata solo dal server, a fine scontro con un boss)
+// Il nodo viene letto per intero e ordinato qui, con una cache: non servono indici.
+
+const LEADERBOARD_TOP = 50;
+const LEADERBOARD_CACHE_MS = 30000;
+
+const LEADERBOARDS = {
+    general: {
+        compare: (a, b) => (b.level || 1) - (a.level || 1) || (b.xp || 0) - (a.xp || 0)
+    },
+    fighters: {
+        wins: e => (e.bossKills || 0) + (e.trialWins || 0),
+        compare: (a, b) => LEADERBOARDS.fighters.wins(b) - LEADERBOARDS.fighters.wins(a) || (b.arenaNumbers || 0) - (a.arenaNumbers || 0)
+    }
+};
+const leaderboardCache = new Map();   // tipo -> { at, ranked }
+
+async function rankedLeaderboard(type) {
+    const cached = leaderboardCache.get(type);
+    if (cached && Date.now() - cached.at < LEADERBOARD_CACHE_MS) return cached.ranked;
+
+    const all = (await db.ref(`leaderboard/${type}`).get()).val() || {};
+    const ranked = Object.entries(all)
+        .map(([uid, e]) => ({ uid, ...e }))
+        .filter(e => e.playerId)
+        .sort(LEADERBOARDS[type].compare)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
+    leaderboardCache.set(type, { at: Date.now(), ranked });
+    return ranked;
+}
+
+async function updateGeneralLeaderboard(req, update) {
+    if (!req.session.playerId) return;
+    const entry = { playerId: req.session.playerId, username: req.session.userName || req.session.playerId.split("#")[0] };
+    for (const k of ["level", "xp"]) if (k in update) entry[k] = update[k];
+    if ("stats/completedSudokus" in update) entry.completedSudokus = update["stats/completedSudokus"];
+    if ("stats/placedNumbers" in update) entry.placedNumbers = update["stats/placedNumbers"];
+    await db.ref(`leaderboard/general/${req.session.userId}`).update(entry);
+}
+
+app.get("/api/leaderboard", requireAuth, api(async (req) => {
+    const type = LEADERBOARDS[req.query.type] ? req.query.type : "general";
+    const ranked = await rankedLeaderboard(type);
+    const strip = ({ uid, ...e }) => e;
+    const mine = req.session.isGuest ? null : ranked.find(e => e.uid === req.session.userId);
+    return {
+        type,
+        entries: ranked.slice(0, LEADERBOARD_TOP).map(e => ({ ...strip(e), me: e.uid === req.session.userId })),
+        me: mine ? strip(mine) : null,
+        total: ranked.length
+    };
+}));
+
+// uid di un giocatore dal suo ID pubblico (null per gli ospiti o ID sconosciuti)
+async function uidForPlayerId(playerId) {
+    const conn = Object.values(players).find(p => p.playerId === playerId && p.authUserId);
+    if (conn) return conn.authUserId;
+    if (!playerId.includes("#") || playerId.startsWith("Guest#")) return null;
+    const snap = await db.ref(`playerIds/${idKey(playerId)}`).get();
+    return snap.exists() ? snap.val().uid : null;
+}
+
+// Esito di uno scontro: aggiorna statistiche e classifica fighters dei partecipanti
+async function recordBossOutcome({ type, result, participants, arenaNumbers }) {
+    const updates = {};
+    const winField = type === "survival_trial" ? "trialWins" : "bossKills";
+
+    for (const pid of new Set([...participants, ...arenaNumbers.keys()])) {
+        const uid = await uidForPlayerId(pid);
+        if (!uid) continue;
+        const lb = `leaderboard/fighters/${uid}`;
+        const numbers = arenaNumbers.get(pid) || 0;
+
+        if (result === "defeated") {
+            updates[`users/${uid}/stats/${winField}`] = increment(1);
+            updates[`${lb}/${winField}`] = increment(1);
+        }
+        if (numbers) {
+            updates[`users/${uid}/stats/arenaNumbers`] = increment(numbers);
+            updates[`${lb}/arenaNumbers`] = increment(numbers);
+        }
+        if (result === "defeated" || numbers) {
+            const username = Object.values(players).find(p => p.playerId === pid)?.name ||
+                (await db.ref(`users/${uid}/username`).get()).val() || pid.split("#")[0];
+            updates[`${lb}/playerId`] = pid;
+            updates[`${lb}/username`] = username;
+        }
+    }
+
+    if (Object.keys(updates).length) {
+        await db.ref().update(updates);
+        leaderboardCache.delete("fighters");
+    }
+}
 
 // Ricerca giocatori per nome o ID (prefisso, senza distinzione maiuscole/minuscole)
 app.get("/api/players/search", requireAccount, api(async (req) => {
@@ -713,8 +821,10 @@ function broadcast(data) {
 // (es. un nodo "worldState/zones/<zoneKey>" per zona).
 const worldState = { zones: {} };
 
+// claimed: maschera a 9 bit delle celle che hanno già dato la ricompensa (XP e Frammenti).
+// Un numero cancellato da un boss e riscritto non viene premiato una seconda volta.
 function zoneState(key) {
-    return worldState.zones[key] ??= { writes: {}, disc: false };
+    return worldState.zones[key] ??= { writes: {}, disc: false, claimed: 0 };
 }
 
 let players = {};
@@ -736,8 +846,220 @@ function broadcastPlayers() {
 const bossSystem = createBossSystem({
     zoneState,
     worldPlayers: () => Object.values(players).filter(p => !p.lobby),
-    broadcast
+    broadcast,
+    onFinished: outcome => recordBossOutcome(outcome).catch(err => console.error("Errore statistiche boss:", err)),
+    strikeMods: b => abilities.strikeMods(b),
+    onStrike: (b, cells) => abilities.onStrike(b, cells)
 });
+
+// Compagni di party connessi nel mondo (compreso p); senza party solo p
+function partyMates(p) {
+    const party = parties.get(partyOf.get(p.playerId));
+    if (!party) return [p];
+    return [...party.members.keys()].map(connOf).filter(q => q && !q.lobby);
+}
+
+const abilities = createAbilitySystem({
+    players, bossSystem, zoneState, broadcast, sendJson, partyMates,
+    // definite più avanti (sezione POSIZIONI): passate tramite funzioni
+    forceMove: (...a) => forceMove(...a),
+    occupantAt: (...a) => occupantAt(...a),
+    nearestFree: (...a) => nearestFree(...a),
+    broadcastPlayers: () => broadcastPlayers()
+});
+
+// ==================== TEMPO DI GIOCO ====================
+// Secondi passati nel mondo (non in home), salvati alla disconnessione e ogni 5 minuti.
+// Base per le future statistiche d'uso delle classi.
+
+function flushPlayTime(p) {
+    if (!p.authUserId || p.lobby || !p.playSince) return;
+    const now = Date.now();
+    const secs = Math.floor((now - p.playSince) / 1000);
+    if (secs < 1) return;
+    p.playSince += secs * 1000;
+    const update = { [`users/${p.authUserId}/stats/playTimeSec`]: increment(secs) };
+    // Tempo con la classe scelta: per giocatore e totale (per vedere il meta e bilanciare)
+    if (p.selectedClass) {
+        const key = variantKey(p.selectedClass.classId, p.selectedClass.variant);
+        update[`users/${p.authUserId}/classTime/${key}`] = increment(secs);
+        update[`classUsage/${key}/timeSec`] = increment(secs);
+    }
+    db.ref().update(update).catch(err => console.error("Errore tempo di gioco:", err));
+}
+
+setInterval(() => Object.values(players).forEach(flushPlayTime), 5 * 60 * 1000);
+
+// ==================== FRAMMENTI (valuta), CLASSI E GACHA ====================
+// I Frammenti si guadagnano scrivendo numeri nuovi (vedi "claimed"). Il saldo è in
+// users/<uid>/wallet/currency; quanto guadagnato in gioco viene salvato a blocchi.
+// Tutte le operazioni sul saldo di un utente passano da withWallet(), una alla volta,
+// così una tirata e un salvataggio contemporanei non si sovrascrivono.
+//   users/<uid>/collection/<classe><variante> = copie trovate (es. "2b": 3)
+//   users/<uid>/selectedClass = { classId, variant }
+
+const CURRENCY_PER_NUMBER = 1;
+const walletLocks = new Map();
+
+function withWallet(uid, fn) {
+    const prev = walletLocks.get(uid) || Promise.resolve();
+    const next = prev.catch(() => { }).then(fn);
+    walletLocks.set(uid, next);
+    next.finally(() => { if (walletLocks.get(uid) === next) walletLocks.delete(uid); }).catch(() => { });
+    return next;
+}
+
+const walletRef = uid => db.ref(`users/${uid}/wallet/currency`);
+const sendWallet = (p, gained = 0) => p.currency != null && sendJson(p, { type: "wallet", currency: p.currency, gained });
+
+function flushCurrency(p) {
+    if (!p.authUserId || !p.pendingCurrency) return Promise.resolve();
+    const amount = p.pendingCurrency;
+    p.pendingCurrency = 0;
+    return withWallet(p.authUserId, async () => {
+        const cur = (await walletRef(p.authUserId).get()).val() || 0;
+        await walletRef(p.authUserId).set(cur + amount);
+    }).catch(err => {
+        p.pendingCurrency += amount;   // riprova al prossimo salvataggio
+        console.error("Errore salvataggio Frammenti:", err);
+    });
+}
+
+setInterval(() => Object.values(players).forEach(flushCurrency), 10000);
+
+async function loadWallet(p) {
+    if (!p.authUserId) return;
+    try {
+        const [cur, sel] = await Promise.all([
+            walletRef(p.authUserId).get(),
+            db.ref(`users/${p.authUserId}/selectedClass`).get()
+        ]);
+        p.currency = (cur.val() || 0) + p.pendingCurrency;
+        const s = sel.val();
+        p.selectedClass = s && findVariant(s.classId, s.variant) ? { classId: s.classId, variant: s.variant } : null;
+        sendWallet(p);
+        abilities.setClass(p, p.selectedClass ? { ...p.selectedClass, level: await variantLevel(p.authUserId, p.selectedClass) } : null);
+    } catch (err) {
+        console.error("Errore caricamento Frammenti:", err);
+    }
+}
+
+function awardCurrency(p, amount) {
+    if (!p.authUserId) return;
+    p.pendingCurrency += amount;
+    if (p.currency != null) p.currency += amount;
+    sendWallet(p, amount);
+}
+
+async function variantLevel(uid, { classId, variant }) {
+    const copies = (await db.ref(`users/${uid}/collection/${variantKey(classId, variant)}`).get()).val() || 0;
+    return levelFromCopies(copies).level;
+}
+
+// Salva i Frammenti in sospeso di tutte le connessioni di un utente (prima di una tirata)
+const flushUser = uid => Promise.all(Object.values(players).filter(p => p.authUserId === uid).map(flushCurrency));
+
+function collectionView(collection) {
+    const classes = CLASS_CATALOG.map(cls => {
+        const variants = cls.variants.map(v => {
+            const copies = collection[variantKey(cls.id, v.id)] || 0;
+            return { ...v, copies, ...levelFromCopies(copies) };
+        });
+        const copies = variants.reduce((n, v) => n + v.copies, 0);
+        return { ...cls, variants, copies, ...levelFromCopies(copies) };
+    });
+    return classes;
+}
+
+app.get("/api/classes", requireAccount, api(async (req) => {
+    const uid = req.session.userId;
+    await flushUser(uid);
+    const [col, sel, cur] = await Promise.all([
+        db.ref(`users/${uid}/collection`).get(),
+        db.ref(`users/${uid}/selectedClass`).get(),
+        walletRef(uid).get()
+    ]);
+    return {
+        classes: collectionView(col.val() || {}),
+        selected: sel.val() || null,
+        currency: cur.val() || 0,
+        pullCost: PULL_COST,
+        tenPullCost: TEN_PULL_COST
+    };
+}));
+
+app.post("/api/gacha/pull", requireAccount, api(async (req) => {
+    const uid = req.session.userId;
+    const count = Number(req.body?.count) === 10 ? 10 : 1;
+    const cost = count === 10 ? TEN_PULL_COST : PULL_COST;
+
+    await flushUser(uid);
+    return withWallet(uid, async () => {
+        const balance = (await walletRef(uid).get()).val() || 0;
+        if (balance < cost) throw new ApiError(400, `Frammenti insufficienti: ne servono ${cost}, ne hai ${balance}`);
+
+        const before = (await db.ref(`users/${uid}/collection`).get()).val() || {};
+        const after = { ...before };
+        const results = [];
+        for (let i = 0; i < count; i++) {
+            const { classId, variant } = rollPull();
+            const key = variantKey(classId, variant);
+            const classCopies = c => CLASS_CATALOG.find(x => x.id === classId).variants
+                .reduce((n, v) => n + (c[variantKey(classId, v.id)] || 0), 0);
+
+            const prevV = levelFromCopies(after[key] || 0).level;
+            const prevC = levelFromCopies(classCopies(after)).level;
+            after[key] = (after[key] || 0) + 1;
+            const nowV = levelFromCopies(after[key]);
+            const nowC = levelFromCopies(classCopies(after));
+            results.push({
+                classId, variant,
+                isNew: prevV === 0,
+                newClass: prevC === 0,
+                level: nowV.level, levelUp: prevV > 0 && nowV.level > prevV,
+                classLevel: nowC.level, classLevelUp: prevC > 0 && nowC.level > prevC,
+                copies: after[key]
+            });
+        }
+
+        const update = { [`users/${uid}/wallet/currency`]: balance - cost };
+        for (const [key, copies] of Object.entries(after)) {
+            if (copies !== before[key]) update[`users/${uid}/collection/${key}`] = copies;
+        }
+        await db.ref().update(update);
+
+        // il saldo mostrato in gioco (se connesso) si aggiorna subito
+        for (const p of Object.values(players)) {
+            if (p.authUserId === uid && p.currency != null) {
+                p.currency = balance - cost + p.pendingCurrency;
+                sendWallet(p);
+            }
+        }
+        return { results, currency: balance - cost };
+    });
+}));
+
+app.post("/api/classes/select", requireAccount, api(async (req) => {
+    const uid = req.session.userId;
+    const classId = Number(req.body?.classId);
+    const variant = String(req.body?.variant ?? "");
+    const found = findVariant(classId, variant);
+    if (!found) throw new ApiError(400, "Classe non valida");
+
+    const copies = (await db.ref(`users/${uid}/collection/${variantKey(classId, variant)}`).get()).val() || 0;
+    if (!copies) throw new ApiError(403, "Non hai ancora sbloccato questa variante");
+
+    await db.ref(`users/${uid}/selectedClass`).set({ classId, variant });
+    // il tempo passato finora va alla classe precedente
+    const level = levelFromCopies(copies).level;
+    for (const p of Object.values(players)) {
+        if (p.authUserId !== uid) continue;
+        flushPlayTime(p);
+        p.selectedClass = { classId, variant };
+        if (!p.lobby) abilities.setClass(p, { classId, variant, level });
+    }
+    return { selected: { classId, variant }, message: `Classe scelta: ${found.cls.name} · ${found.v.name}` };
+}));
 
 // ==================== POSIZIONI: UN SOLO GIOCATORE PER CELLA ====================
 // Il server decide le posizioni. Un passo verso una cella occupata spinge l'altro
@@ -803,6 +1125,7 @@ function handleMove(p, x, y) {
     if (!other) {
         p.x = x;
         p.y = y;
+        abilities.onMoved(p);   // portali della classe 4
     } else if (Math.abs(dx) + Math.abs(dy) === 1) {
         // Spinta: l'altro avanza di una cella nella stessa direzione, senza uscire
         // dall'arena del boss in cui si trova (né entrarci da fuori)
@@ -1031,7 +1354,11 @@ wss.on("connection", (ws, req) => {
         hp: null,
         maxHp: null,
         level: null,
-        lobby
+        lobby,
+        playSince: lobby ? null : Date.now(),
+        currency: null,          // saldo Frammenti noto (caricato all'ingresso)
+        pendingCurrency: 0,      // guadagnati ma non ancora salvati
+        selectedClass: null
     };
 
     ws.send(JSON.stringify({
@@ -1075,6 +1402,8 @@ wss.on("connection", (ws, req) => {
 
             broadcastPlayers();
             if (!p.lobby) ws.send(JSON.stringify(bossSystem.snapshot()));
+            if (!p.lobby) loadWallet(p);
+            if (!p.lobby) sendJson(p, abilities.portalsSnapshot());
 
             // Rientro dopo una disconnessione: si torna nel proprio party
             const party = parties.get(partyOf.get(p.playerId));
@@ -1089,9 +1418,11 @@ wss.on("connection", (ws, req) => {
             const level = Math.floor(Number(msg.level));
             if (![hp, maxHp, level].every(Number.isFinite) || maxHp < 1 || maxHp > 1e6 || level < 1 || level > 1e4) return;
 
+            const levelChanged = p.level !== level;
             p.hp = Math.max(0, Math.min(hp, maxHp));
             p.maxHp = maxHp;
             p.level = level;
+            if (levelChanged && !p.lobby) abilities.sendState(p);
 
             const party = parties.get(partyOf.get(p.playerId));
             if (party) syncParty(party);
@@ -1128,7 +1459,8 @@ wss.on("connection", (ws, req) => {
                 type: "zone_info",
                 zoneKey: zk.key,
                 playable,
-                writes: zone.writes
+                writes: zone.writes,
+                claimed: zone.claimed || 0
             }));
         }
         else if (msg.type === "write") {
@@ -1151,11 +1483,25 @@ wss.on("connection", (ws, req) => {
             if (val !== solutionAtCell(gx, gy)) return;
             if (revealedMask(zk.zx, zk.zy) & (1 << (cy * 3 + cx))) return;
             if (zone.writes[writeKey]) return;
-            zone.writes[writeKey] = { val, color };
+            zone.writes[writeKey] = { val, color, by: p.playerId };
+
+            // Ricompensa solo alla prima scrittura della cella (niente farming dopo gli attacchi dei boss)
+            const bit = 1 << (cy * 3 + cx);
+            const fresh = !(zone.claimed & bit);
+            zone.claimed |= bit;
+            if (fresh) awardCurrency(p, CURRENCY_PER_NUMBER);
 
             // Le coordinate globali vengono ricavate dal client a partire da zona e cella locale.
-            broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color });
+            broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color, by: p.playerId });
             bossSystem.onWrite(gx, gy, p);
+            abilities.onWrite(p, gx, gy, val);
+        }
+        else if (msg.type === "ability") {
+            if (!p.lobby) abilities.use(p, msg.target);
+        }
+        else if (msg.type === "player_hit") {
+            const dmg = Number(msg.dmg);
+            if (!p.lobby && Number.isFinite(dmg) && dmg > 0 && dmg < 1e5) abilities.onPlayerHit(p, dmg);
         }
         else if (msg.type === "player_died") {
             if (Number.isInteger(msg.x) && Number.isInteger(msg.y)) bossSystem.onPlayerDied(p, msg.x, msg.y);
@@ -1167,6 +1513,10 @@ wss.on("connection", (ws, req) => {
 
     ws.on("close", () => {
         const p = players[connectionId];
+        if (p) {
+            flushPlayTime(p);
+            flushCurrency(p);
+        }
         delete players[connectionId];
         broadcastPlayers();
 
@@ -1210,6 +1560,30 @@ async function backfillSearchIndex() {
     }
 }
 backfillSearchIndex();
+
+async function backfillGeneralLeaderboard() {
+    try {
+        const existing = (await db.ref("leaderboard/general").get()).val() || {};
+        const users = (await db.ref("users").get()).val() || {};
+        const updates = {};
+        for (const [uid, u] of Object.entries(users)) {
+            if (existing[uid] || !u?.playerId || !u.username) continue;
+            updates[uid] = {
+                playerId: u.playerId, username: u.username,
+                level: u.level || 1, xp: u.xp || 0,
+                completedSudokus: u.stats?.completedSudokus || 0,
+                placedNumbers: u.stats?.placedNumbers || 0
+            };
+        }
+        if (Object.keys(updates).length) {
+            await db.ref("leaderboard/general").update(updates);
+            console.log(`Classifica generale: aggiunti ${Object.keys(updates).length} giocatori`);
+        }
+    } catch (err) {
+        console.error("Errore classifica generale:", err);
+    }
+}
+backfillGeneralLeaderboard();
 
 server.listen(3000, () => {
     console.log("Server attivo su http://localhost:3000");

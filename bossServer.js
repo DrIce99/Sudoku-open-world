@@ -13,6 +13,15 @@
 //   boss_failed     { bossId }
 //   boss_despawned  { bossId }
 // Dai client: player_died { x, y } (serve alla Survival Trial).
+//
+// A fine scontro onFinished({ type, result, participants, arenaNumbers }) riceve
+// l'esito ("defeated" | "failed" | "despawned"), chi ha partecipato e quanti numeri
+// ha scritto ognuno nell'arena: server.js lo usa per statistiche e classifiche.
+//
+// Abilità delle classi (abilities.js): damageBoss() / stun() e strikeMods(b), che
+// dice quali protezioni valgono nell'arena al momento del colpo:
+//   { bastion, auras: [{ x, y, reduction }], rage: [playerId], protectValues: [cifre] }
+// I mods arrivano ai client nel boss_strike (e nello stato "bosses" per mostrarli).
 
 import { randomUUID } from "crypto";
 import { isPlayableZone, revealedMask, mod } from "./worldgen.js";
@@ -55,7 +64,10 @@ const TYPES = {
     }
 };
 
-export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
+const NO_MODS = { bastion: false, auras: [], rage: [], protectValues: [] };
+const STUN_DAMAGE_MULT = 1.5;   // un boss congelato subisce danni aumentati
+
+export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinished = () => { }, strikeMods = () => NO_MODS, onStrike = () => { } }) {
     const bosses = new Map();
     let spawnTimer = 0, stateTimer = 0, hadBosses = false;
 
@@ -79,11 +91,16 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
 
     const playersInside = b => worldPlayers().filter(p => containsCell(b, p.x, p.y));
 
+    const stunned = b => (b.stunUntil || 0) > Date.now();
+
     function view(b) {
+        const mods = strikeMods(b);
         return {
             id: b.id, type: b.type, name: b.name, bx: b.bx, by: b.by,
             hp: Math.round(b.hp), maxHp: b.maxHp,
-            timeLeft: b.timeLeft ?? null, duration: b.duration ?? null, started: !!b.started
+            timeLeft: b.timeLeft ?? null, duration: b.duration ?? null, started: !!b.started,
+            stunMs: Math.max(0, (b.stunUntil || 0) - Date.now()),
+            bastion: mods.bastion, auras: mods.auras, counters: mods.counters || []
         };
     }
 
@@ -119,6 +136,7 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
             attackTimer: 0, attacking: false,
             units: new Set(), windowDone: false,
             participants: new Set(),
+            arenaNumbers: new Map(),   // playerId -> numeri scritti nell'arena
             lastNearby: now
         };
         if (type === "survival_trial") {
@@ -144,13 +162,23 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
     }
 
     /* ---------------- esito ---------------- */
+    function finished(b, result) {
+        try {
+            onFinished({ type: b.type, result, participants: [...b.participants], arenaNumbers: b.arenaNumbers });
+        } catch (err) {
+            console.error("Errore esito boss:", err);
+        }
+    }
+
     function defeat(b) {
         if (!bosses.delete(b.id)) return;
+        finished(b, "defeated");
         broadcast({ type: "boss_defeated", bossId: b.id, participants: [...b.participants], xp: DEFEAT_XP });
     }
 
     function fail(b) {
         if (!bosses.delete(b.id)) return;
+        finished(b, "failed");
         broadcast({ type: "boss_failed", bossId: b.id });
     }
 
@@ -206,24 +234,32 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
         const cells = Math.random() < 0.5 ? lineCells(b) : drunkCells(b, t.drunkAreas);
         const attackId = randomUUID();
         b.attacking = true;
+        // attacco in corso: serve alle abilità che reagiscono al colpo (parry, aura di risposta)
+        b.pending = { attackId, cells, strikeAt: Date.now() + t.telegraph, parried: new Set() };
 
         broadcast({ type: "boss_telegraph", bossId: b.id, attackId, cells, duration: t.telegraph, dmgPct: t.dmgPct, minDmg: t.minDmg });
 
         setTimeout(() => {
             b.attacking = false;
             b.attackTimer = 0;
+            const parried = [...(b.pending?.parried || [])];
+            b.pending = null;
             if (!bosses.has(b.id)) {
                 broadcast({ type: "boss_strike", bossId: b.id, attackId, cells, cancelled: true });
                 return;
             }
             // prima il colpo (i client decidono se sono stati colpiti), poi i numeri cancellati
-            broadcast({ type: "boss_strike", bossId: b.id, attackId, cells });
+            const mods = { ...strikeMods(b), parried };
+            onStrike(b, cells);
+            if (!bosses.has(b.id)) return;   // l'aura di risposta può averlo sconfitto
+            broadcast({ type: "boss_strike", bossId: b.id, attackId, cells, mods });
             for (const { x, y } of cells) {
                 const zx = Math.floor(x / 3), zy = Math.floor(y / 3);
                 const lx = mod(x, 3), ly = mod(y, 3);
                 const zone = zoneState(`${zx},${zy}`);
                 // i numeri iniziali (comprese le celle immortali) non sono "writes": restano
-                if (!zone.writes[`${lx},${ly}`]) continue;
+                const w = zone.writes[`${lx},${ly}`];
+                if (!w || mods.protectValues.includes(w.val)) continue;
                 delete zone.writes[`${lx},${ly}`];
                 broadcast({ type: "write", zoneKey: `${zx},${zy}`, cx: lx, cy: ly, val: 0, color: null });
             }
@@ -252,7 +288,8 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
                 // la vita cambia solo mentre qualcuno sta combattendo
                 if (inside.length) {
                     const ratio = fillRatio(b);
-                    if (ratio < 0.5) b.hp = Math.min(b.maxHp, b.hp + t.regenPerSec * dt / 1000);
+                    // congelato: non si rigenera (ma continua a perdere vita se il sudoku è pieno)
+                    if (ratio < 0.5) { if (!stunned(b)) b.hp = Math.min(b.maxHp, b.hp + t.regenPerSec * dt / 1000); }
                     else damage(b, t.decayPerSec * (ratio - 0.49) * dt / 1000);
                     if (!bosses.has(b.id)) continue;
                 }
@@ -267,13 +304,14 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
                 }
             }
 
-            if (inside.length && !b.attacking) {
+            if (inside.length && !b.attacking && !stunned(b)) {
                 b.attackTimer += dt;
                 if (b.attackTimer >= t.attackInterval) attack(b);
             }
 
             if (!inside.length && !b.started && now - b.lastNearby > DESPAWN_AFTER_MS) {
                 bosses.delete(b.id);
+                finished(b, "despawned");
                 broadcast({ type: "boss_despawned", bossId: b.id });
             }
         }
@@ -301,6 +339,7 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
             if (!containsCell(b, x, y)) continue;
             const t = TYPES[b.type];
             b.participants.add(p.playerId);
+            b.arenaNumbers.set(p.playerId, (b.arenaNumbers.get(p.playerId) || 0) + 1);
 
             if (b.type === "survival_trial") {
                 startTrial(b);
@@ -330,9 +369,31 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
     }
 
     function reward(b, unit, amount) {
-        broadcast({ type: "boss_hurt", bossId: b.id, amount, unit });
+        if (stunned(b)) amount *= STUN_DAMAGE_MULT;
+        broadcast({ type: "boss_hurt", bossId: b.id, amount: Math.round(amount), unit });
         if (b.type === "sudoku_hp") damage(b, amount);
         else reduceTime(b, amount);
+    }
+
+    // Danno da un'abilità: vita per i boss, tempo per le Survival Trial (stessa scala della barra)
+    function damageBoss(b, amount, p, source) {
+        if (!bosses.has(b.id) || !(amount > 0)) return 0;
+        if (stunned(b)) amount *= STUN_DAMAGE_MULT;
+        if (p) b.participants.add(p.playerId);
+        broadcast({ type: "boss_hurt", bossId: b.id, amount: Math.round(amount), unit: source, by: p?.name || null });
+        if (b.type === "sudoku_hp") damage(b, amount);
+        else {
+            startTrial(b);
+            reduceTime(b, amount / b.maxHp * b.duration);
+        }
+        return amount;
+    }
+
+    function stun(b, ms, p) {
+        if (!bosses.has(b.id)) return;
+        b.stunUntil = Math.max(b.stunUntil || 0, Date.now() + ms);
+        if (p) b.participants.add(p.playerId);
+        broadcast({ type: "boss_stunned", bossId: b.id, ms, by: p?.name || null });
     }
 
     // Un giocatore è morto: se era l'unico dentro una Survival Trial, la prova fallisce
@@ -347,11 +408,14 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast }) {
     // Stato iniziale per chi entra nel mondo
     const snapshot = () => ({ type: "bosses", list: [...bosses.values()].map(view) });
 
-    // Id del boss nella cui arena si trova la cella (null se fuori da ogni arena)
-    function arenaAt(x, y) {
-        for (const b of bosses.values()) if (containsCell(b, x, y)) return b.id;
+    // Boss nella cui arena si trova la cella (null se fuori da ogni arena)
+    function bossAt(x, y) {
+        for (const b of bosses.values()) if (containsCell(b, x, y)) return b;
         return null;
     }
+    const arenaAt = (x, y) => bossAt(x, y)?.id ?? null;
 
-    return { onWrite, onPlayerDied, snapshot, arenaAt, cellFilled };
+    const pendingAttack = b => b.pending || null;
+
+    return { onWrite, onPlayerDied, snapshot, arenaAt, bossAt, cellFilled, containsCell, damageBoss, stun, pendingAttack };
 }

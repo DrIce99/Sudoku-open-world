@@ -41,6 +41,7 @@
             <kbd>WASD</kbd> / <kbd>Frecce</kbd> muovi<br>
             <kbd>1-9</kbd> scrivi numero<br>
             <kbd>N</kbd> note a matita<br>
+            <kbd>Spazio</kbd> abilità della classe<br>
             <kbd>R</kbd> blocca/sblocca vista<br>
             <kbd>C</kbd> cerca giocatori<br>
             <kbd>F</kbd> amici &nbsp; <kbd>P</kbd> party<br>
@@ -64,14 +65,27 @@
             <span class="lbl">HP</span>
             <div class="bar"><div id="hpFill" class="fill"></div></div>
             <span id="hpText" class="lbl">100 / 100</span>
+            <span id="shieldTag" title="Scudo: assorbe i danni dei boss" hidden>+0</span>
         </div>
         <div class="barRow">
             <span class="lbl">XP</span>
             <div class="bar"><div id="xpFill" class="fill"></div></div>
             <span id="lvl" class="lbl">LV 1</span>
         </div>
+        <div class="barRow hud-meta" hidden>
+            <span id="hudClass">NESSUNA CLASSE</span>
+            <span id="hudGems" title="Frammenti: si ottengono scrivendo numeri nuovi">◆ 0</span>
+        </div>
     </div>
 
+
+    <!-- Abilità della classe scelta (Spazio) -->
+    <button id="abilitySlot" type="button" hidden>
+        <span class="ab-key">—</span>
+        <span class="ab-name">NESSUNA CLASSE</span>
+        <span class="ab-info"></span>
+        <i class="ab-cd"></i>
+    </button>
 
     <div id="toasts"></div>
     <div id="vignette"></div>
@@ -100,6 +114,7 @@
     <script src="/js/fx.js"></script>
     <script src="/js/game.js"></script>
     <script src="/js/bossSystem.js"></script>
+    <script src="/js/abilitiesClient.js"></script>
     <script src="/js/social.js"></script>
     <script>
         Social.init({ mode: "game", getWs: () => ws, getMe: () => myPlayerId });

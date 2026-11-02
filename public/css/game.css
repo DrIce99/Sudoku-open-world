@@ -85,6 +85,84 @@ body, html {
     to { border-color: var(--yellow); }
 }
 
+/* Boss congelato (classe 8) e Bastione attivo (classe 3) */
+.boss-area-outline.stunned {
+    border-color: #73eff7 !important;
+    animation: none;
+    background: repeating-linear-gradient(45deg, rgba(115, 239, 247, .14) 0 12px, rgba(255, 255, 255, .08) 12px 24px);
+}
+
+.boss-area-outline.bastion {
+    outline: 4px solid #3b5dc9;
+    outline-offset: 6px;
+}
+
+/* Aura della classe 3: 3x3 attorno a chi sta su un 3 */
+.boss-aura {
+    position: absolute;
+    z-index: 55;
+    pointer-events: none;
+    background: rgba(59, 93, 201, .16);
+    box-shadow: inset 0 0 0 4px rgba(59, 93, 201, .8), inset 0 0 0 8px rgba(26, 28, 44, .35);
+    animation: auraPulse 1s steps(2) infinite;
+}
+
+@keyframes auraPulse {
+    50% { background: rgba(59, 93, 201, .28); }
+}
+
+/* Aura di risposta (classe 7): colpita dal boss gli restituisce i danni */
+.boss-aura.counter {
+    background: rgba(234, 179, 8, .14);
+    box-shadow: inset 0 0 0 4px rgba(234, 179, 8, .9), inset 0 0 0 8px rgba(26, 28, 44, .35);
+    animation: counterPulse .6s steps(2) infinite;
+}
+
+@keyframes counterPulse {
+    50% { background: rgba(234, 179, 8, .3); }
+}
+
+/* Portale (classe 4): i due capi lampeggiano nel colore del proprietario */
+.portal {
+    position: absolute;
+    z-index: 3;
+    width: var(--cell);
+    height: var(--cell);
+    pointer-events: none;
+    background:
+        radial-gradient(circle, transparent 0 30%, color-mix(in srgb, var(--p-color) 45%, transparent) 31% 45%, transparent 46% 60%, color-mix(in srgb, var(--p-color) 35%, transparent) 61% 72%, transparent 73%);
+    box-shadow: inset 0 0 0 4px var(--p-color), inset 0 0 0 7px rgba(26, 28, 44, .45);
+    animation: portalSpin 1.2s steps(6) infinite;
+}
+
+@keyframes portalSpin {
+    to { transform: rotate(90deg); }
+}
+
+/* Mirino del Salto (classe 4) sul 4 scelto con la rotella */
+.tp-target {
+    position: absolute;
+    z-index: 7;
+    width: var(--cell);
+    height: var(--cell);
+    pointer-events: none;
+    border: 4px dashed #b55ed6;
+    box-shadow: 0 0 0 3px var(--ink);
+    animation: targetPulse .5s steps(2) infinite;
+}
+
+.tp-target[hidden] { display: none; }
+
+@keyframes targetPulse {
+    50% { transform: scale(1.12); }
+}
+
+/* Blink (classe 6): si punta col mouse */
+#stage.blink-mode { cursor: crosshair; }
+
+/* numeri-indizio della classe 5 */
+.num.hint { font-style: italic; text-shadow: 3px 3px 0 rgba(56, 183, 100, .35); }
+
 /* Preavviso Attacco Boss (Telegraphing): strisce di pericolo + riempimento a tempo */
 .boss-attack-cell {
     position: absolute;

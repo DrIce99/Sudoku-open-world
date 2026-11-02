@@ -167,7 +167,11 @@ function applyRemoteWrite(msg) {
     if ((z.rev & m) || (z.wr & m) || z.v[li] !== Number(msg.val)) return;
 
     z.wr |= m;
-    z.own &= ~m;
+    // "propri" anche i numeri scritti da noi in una sessione precedente (servono alle classi 4)
+    if (msg.by && msg.by === myPlayerId) z.own |= m;
+    else z.own &= ~m;
+    // gli indizi della classe 5 non danno ricompense: la cella resta premiabile
+    if (!msg.hint) z.claimed |= m;
     notesMask.delete(gx + "," + gy);
     renderNotes(gx, gy);
 
@@ -176,6 +180,7 @@ function applyRemoteWrite(msg) {
 
     const el = createNum(gx, gy, msg.val, "written_other");
     if (el) el.style.color = displayColor;
+    if (el) el.classList.toggle("hint", !!msg.hint);
     window.FX?.remoteNumber(gx, gy, displayColor);
 
     if (zKey(zx, zy) === zKey(curZone.x, curZone.y)) {
@@ -199,7 +204,9 @@ function applyRemoteWrites(zoneKey, writes) {
             cx: lx,
             cy: ly,
             val: w.val,
-            color: w.color
+            color: w.color,
+            by: w.by,
+            hint: w.hint
         });
     }
 }
@@ -356,7 +363,8 @@ function genSingleZone(tzx, tzy) {
             h0: 0,
             disc: false,
             diff: "empty",
-            empty: true
+            empty: true,
+            claimed: 0
         };
         zones.set(key, z);
 
@@ -406,7 +414,9 @@ function genSingleZone(tzx, tzy) {
         h0: 9 - pc(rev),
         disc: false,
         diff,
-        empty: false
+        empty: false,
+        // celle che hanno già dato la ricompensa (anche se poi un boss ha cancellato il numero)
+        claimed: 0
     };
     zones.set(key, z);
 
@@ -567,7 +577,7 @@ function tryMove(dx, dy) {
             return;
         }
 
-        if (cellShown(nx, ny) !== 0) {
+        if (cellShown(nx, ny) !== 0 && !window.Abilities?.freeMove()) {
             bump();
             return;
         }
@@ -585,7 +595,8 @@ function tryMove(dx, dy) {
         return;
     }
 
-    if (cellShown(nx, ny) !== 0) {
+    // Passo libero (classe 6): si cammina anche sopra i numeri
+    if (cellShown(nx, ny) !== 0 && !window.Abilities?.freeMove()) {
         bump();
         return;
     }
@@ -730,16 +741,21 @@ function doWrite(z, li, d) {
     z.wr |= 1 << li;
     z.own |= 1 << li;
 
+    // XP solo la prima volta che la cella viene completata: riscrivere un numero
+    // cancellato da un boss non dà di nuovo la ricompensa
+    const fresh = !(z.claimed & (1 << li));
+    z.claimed |= 1 << li;
+
     notesMask.delete(cx + "," + cy);
     renderNotes(cx, cy);
 
     const el = createNum(cx, cy, d, "written");
-    window.FX?.numberPlaced(cx, cy, d, el);
+    window.FX?.numberPlaced(cx, cy, d, el, fresh);
 
     playerStats.stats.placedNumbers++;
     sendWrite(cx, cy, d);
 
-    gainXp(5);
+    if (fresh) gainXp(5);
     checkUnits();
     highlight();
     // L'effetto sui boss (vita / timer) lo calcola il server alla ricezione della scrittura
@@ -1177,6 +1193,7 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (k === "n") { toggleNotes(); return; }
+    if (k === " ") { window.Abilities?.use(); e.preventDefault(); return; }
     if (k === "c") { window.Social?.open("search"); e.preventDefault(); return; }
     if (k === "f") { window.Social?.open("friends"); return; }
     if (k === "p") { window.Social?.open("party"); return; }
@@ -1458,6 +1475,7 @@ async function initGame() {
         }
 
         createPlayerIdBadge(myPlayerId || myName);
+        loadSelectedClass();
 
         playerStats = { ...playerStats, ...data };
 
@@ -1582,6 +1600,7 @@ function connectWebSocket() {
             try { msg = JSON.parse(event.data); } catch { return; }
             window.Social?.onMessage(msg);
             window.bossManager?.onMessage(msg);
+            window.Abilities?.onMessage(msg);
 
             if (msg.type === "init") {
                 myId = msg.myId;
@@ -1608,6 +1627,9 @@ function connectWebSocket() {
             else if (msg.type === "pushed_other") {
                 window.FX?.pushedOther();
             }
+            else if (msg.type === "wallet") {
+                updateWallet(msg.currency, msg.gained);
+            }
             else if (msg.type === "write") {
                 applyRemoteWrite(msg);
                 if (mapMode) drawMinimap();
@@ -1615,6 +1637,7 @@ function connectWebSocket() {
             else if (msg.type === "zone_info") {
                 const [zx, zy] = String(msg.zoneKey).split(',').map(Number);
                 const z = getZone(zx, zy);
+                if (z && msg.claimed) z.claimed |= msg.claimed;
                 if (z && msg.writes) applyRemoteWrites(msg.zoneKey, msg.writes);
                 if (mapMode) drawMinimap();
             }
@@ -1622,6 +1645,42 @@ function connectWebSocket() {
     } catch (e) {
         console.warn("WebSocket non disponibile, fallback offline.", e);
         ws = null;
+    }
+}
+
+// Frammenti (valuta del gacha) nell'HUD
+function updateWallet(currency, gained = 0) {
+    const el = document.getElementById("hudGems");
+    if (!el) return;
+    el.textContent = "◆ " + currency;
+    el.parentElement.hidden = false;
+    if (gained) {
+        window.FX?.floatText(player.x, player.y + 0.4, `+${gained} ◆`, "gem");
+        el.classList.remove("bump");
+        void el.offsetWidth;
+        el.classList.add("bump");
+    }
+}
+
+// Classe scelta in home (le abilità arriveranno classe per classe)
+async function loadSelectedClass() {
+    try {
+        const data = await (await fetch("/api/classes")).json();
+        if (data.status !== "success") return;
+        const el = document.getElementById("hudClass");
+        const row = el.parentElement;
+        row.hidden = false;
+        updateWallet(data.currency);
+        const sel = data.selected && data.classes.find(c => c.id === data.selected.classId);
+        const v = sel?.variants.find(v => v.id === data.selected.variant);
+        if (!sel || !v) {
+            el.textContent = "NESSUNA CLASSE";
+            return;
+        }
+        el.textContent = `${sel.id} · ${v.name.toUpperCase()} LV ${v.level}`;
+        el.style.setProperty("--cls", sel.color);
+    } catch (err) {
+        console.warn("Classe non disponibile:", err);
     }
 }
 

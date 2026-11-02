@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/home.css">
     <link rel="stylesheet" href="/css/social.css">
+    <link rel="stylesheet" href="/css/leaderboard.css">
+    <link rel="stylesheet" href="/css/classes.css">
 </head>
 <body class="px-scanlines">
 
@@ -41,6 +43,10 @@
                         <div class="px-bar xp"><div id="xp-fill" class="fill"></div></div>
                     </div>
                     <div id="xp-text" class="xp-text">0 / 100 XP</div>
+                    <div class="class-line">
+                        <span id="player-class">Nessuna classe</span>
+                        <span id="player-gems">◆ 0</span>
+                    </div>
                 </div>
             </section>
 
@@ -48,6 +54,12 @@
             <nav class="menu" id="menu">
                 <a href="/game" class="px-btn green menu-item play" data-sfx="confirm">
                     <span class="cursor">▶</span>ENTRA NEL MONDO
+                </a>
+                <a href="#" class="px-btn menu-item classes-item" data-classes-open>
+                    <span class="cursor">▶</span>CLASSI &amp; GACHA
+                </a>
+                <a href="#" class="px-btn ghost menu-item" data-leaderboard-open>
+                    <span class="cursor">▶</span>CLASSIFICA
                 </a>
                 <a href="#" class="px-btn yellow menu-item" data-social-open="friends">
                     <span class="cursor">▶</span>AMICI <span class="badge" data-social-badge hidden></span>
@@ -76,11 +88,26 @@
                         <strong id="stat-wrong">0</strong>
                         <span>Errori commessi</span>
                     </div>
+                    <div class="stat fighter">
+                        <canvas class="icon" data-icon="sword" width="10" height="10"></canvas>
+                        <strong id="stat-boss">0</strong>
+                        <span>Boss sconfitti</span>
+                    </div>
+                    <div class="stat fighter">
+                        <canvas class="icon" data-icon="hourglass" width="10" height="10"></canvas>
+                        <strong id="stat-trials">0</strong>
+                        <span>Survival Trial superate</span>
+                    </div>
+                    <div class="stat">
+                        <canvas class="icon" data-icon="clock" width="10" height="10"></canvas>
+                        <strong id="stat-time">0m</strong>
+                        <span>Tempo nel mondo</span>
+                    </div>
                 </div>
             </section>
         </div>
 
-        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE · <kbd>C</kbd> CERCA GIOCATORI</p>
+        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE · <kbd>C</kbd> CERCA · <kbd>L</kbd> CLASSIFICA · <kbd>G</kbd> GACHA</p>
     </main>
 
     <!-- Transizione a quadrati pixel verso il gioco -->
@@ -89,6 +116,8 @@
     <script src="/js/sfx.js"></script>
     <script src="/js/home.js"></script>
     <script src="/js/social.js"></script>
+    <script src="/js/leaderboard.js"></script>
+    <script src="/js/classesPanel.js"></script>
     <script>
         Social.init({ mode: "home" });
     </script>

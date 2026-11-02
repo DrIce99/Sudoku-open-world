@@ -16,6 +16,7 @@ class ClientBoss {
         this.outlineEl.className = "boss-area-outline";
         worldEl.appendChild(this.outlineEl);
         this.layout();
+        this.update(data);
     }
 
     // Posizione dell'area 9x9 (richiamata anche quando cambia la dimensione delle celle)
@@ -28,11 +29,41 @@ class ClientBoss {
 
     update(data) {
         Object.assign(this, data);
+        this.outlineEl.classList.toggle("stunned", this.stunMs > 0);
+        this.outlineEl.classList.toggle("bastion", !!this.bastion);
+        this.renderAuras();
+    }
+
+    // Aure disegnate sull'arena: classe 3 (3x3 attorno a chi sta su un 3)
+    // e classe 7 (aure di risposta su 3x3, riga o colonna)
+    renderAuras() {
+        this.auraEls ??= [];
+        const rects = [
+            ...(this.auras || []).map(a => ({ cls: "boss-aura", x0: a.x - 1, y0: a.y - 1, x1: a.x + 1, y1: a.y + 1 })),
+            ...(this.counters || []).map(c => ({ cls: "boss-aura counter", ...c }))
+        ];
+        while (this.auraEls.length > rects.length) this.auraEls.pop().remove();
+        while (this.auraEls.length < rects.length) {
+            const el = document.createElement("div");
+            worldEl.appendChild(el);
+            this.auraEls.push(el);
+        }
+        rects.forEach((r, i) => {
+            const el = this.auraEls[i];
+            el.className = r.cls;
+            el.style.left = (r.x0 * CELL) + "px";
+            el.style.top = (r.y0 * CELL) + "px";
+            el.style.width = ((r.x1 - r.x0 + 1) * CELL) + "px";
+            el.style.height = ((r.y1 - r.y0 + 1) * CELL) + "px";
+            if (r.color) el.style.setProperty("--p-color", r.color);
+        });
     }
 
     destroy() {
         this.outlineEl?.remove();
         this.outlineEl = null;
+        (this.auraEls || []).forEach(el => el.remove());
+        this.auraEls = [];
     }
 
     // Controlla se una coordinata assoluta di celle appartiene al boss (9x9)
@@ -117,7 +148,15 @@ class BossManager {
             case "boss_strike": return this.strike(msg);
             case "boss_hurt": {
                 const boss = this.bosses.get(msg.bossId);
-                if (boss && this.isInside(boss)) window.FX?.bossHurt(msg.amount);
+                if (!boss || !this.isNear(boss)) return;
+                // numeri di danno sopra l'arena; scossone solo per i colpi grossi
+                window.FX?.bossDamage(boss, msg.amount, msg.unit);
+                if (this.isInside(boss) && msg.amount >= 50) window.FX?.bossHurt(msg.amount);
+                return;
+            }
+            case "boss_stunned": {
+                const boss = this.bosses.get(msg.bossId);
+                if (boss && this.isNear(boss)) window.FX?.bossStunned(boss, msg.by, this.isInside(boss));
                 return;
             }
             case "boss_defeated": return this.defeated(msg);
@@ -213,16 +252,43 @@ class BossManager {
         this.attacks.delete(msg.attackId);
         a.els.forEach(el => el.remove());
 
-        const hit = !msg.cancelled && a.cells.some(c => c.x === player.x && c.y === player.y);
-        window.FX?.strike(a.fx, hit);
-        if (hit) this.hitPlayerByAttack(this.bosses.get(a.bossId), a);
+        const mods = msg.mods || {};
+        const onTarget = !msg.cancelled && a.cells.some(c => c.x === player.x && c.y === player.y);
+        // Bastione (classe 3): chi sta su un 3 è immune; Parry (classe 7): colpo parato
+        const immune = onTarget && mods.bastion && cellShown(player.x, player.y) === 3;
+        const parried = onTarget && (mods.parried || []).includes(myPlayerId);
+        window.FX?.strike(a.fx, onTarget);
+        if (parried) {
+            window.FX?.floatText(player.x, player.y, "PARATO", "dodge");
+        } else if (immune) {
+            window.FX?.floatText(player.x, player.y, "IMMUNE", "dodge");
+            window.SFX?.play("dodge");
+        } else if (onTarget) {
+            this.hitPlayerByAttack(this.bosses.get(a.bossId), a, mods);
+        }
     }
 
-    hitPlayerByAttack(boss, attack) {
-        const dmg = Math.max(attack.minDmg, Math.round(maxHp * attack.dmgPct));
+    hitPlayerByAttack(boss, attack, mods = {}) {
+        let dmg = Math.max(attack.minDmg, Math.round(maxHp * attack.dmgPct));
+
+        // Aura (classe 3): riduzione se si è nel 3x3 attorno a chi la genera
+        const reduction = Math.max(0, ...(mods.auras || [])
+            .filter(a => Math.abs(a.x - player.x) <= 1 && Math.abs(a.y - player.y) <= 1)
+            .map(a => a.reduction));
+        dmg *= 1 - reduction;
+        // Furia (classe 1) attiva: danni subiti +50%
+        if ((mods.rage || []).includes(myPlayerId)) dmg *= 1.5;
+        dmg = Math.round(dmg);
+
+        // danni subiti (prima dello scudo): servono all'Accumulo della classe 2
+        if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "player_hit", dmg }));
+
+        const absorbed = window.Abilities?.absorb(dmg) || 0;
+        dmg -= absorbed;
         hp -= dmg;
 
-        toast(`Colpito da ${boss?.name || "un boss"}! -${dmg} HP`, "bad");
+        const extra = absorbed ? ` (scudo ${absorbed})` : reduction ? ` (aura -${Math.round(reduction * 100)}%)` : "";
+        toast(`Colpito da ${boss?.name || "un boss"}! -${dmg} HP${extra}`, "bad");
         window.FX?.playerHit(dmg);
 
         if (hp <= 0) {
@@ -329,12 +395,14 @@ class BossManager {
 
             const titleEl = document.getElementById("boss-hud-title");
 
+            let title = currentBoss.name;
             if (currentBoss.type === "survival_trial") {
                 const secs = currentBoss.started ? Math.ceil(currentBoss.timeLeft) : currentBoss.duration;
-                titleEl.textContent = `${currentBoss.name} · ${secs}s`;
-            } else {
-                titleEl.textContent = currentBoss.name;
+                title += ` · ${secs}s`;
             }
+            if (currentBoss.stunMs > 0) title += " · CONGELATO";
+            if (currentBoss.bastion) title += " · BASTIONE";
+            titleEl.textContent = title;
 
             const fillPct = Math.max(0, (currentBoss.hp / currentBoss.maxHp) * 100);
             document.getElementById("boss-hp-fill").style.width = fillPct + "%";

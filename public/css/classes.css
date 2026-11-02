@@ -1,0 +1,385 @@
+/* ============================================================
+   CLASSI E GACHA (home) — riusa .social-box / .lb-tabs / .lb-hint
+   ============================================================ */
+#clPanel {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(26, 28, 44, .6);
+    font-family: var(--font-body);
+}
+
+#clPanel.hidden,
+#gachaReveal.hidden { display: none; }
+
+.cl-box {
+    width: min(680px, 100%);
+    max-height: min(760px, calc(100vh - 32px));
+}
+
+.cl-box header { gap: 12px; }
+.cl-box header h2 { flex: 1; }
+
+.cl-gems {
+    font-family: var(--font-title);
+    font-size: 12px;
+    color: var(--cyan);
+    padding: 7px 10px;
+    background: var(--ink);
+    text-shadow: 2px 2px 0 #000;
+}
+
+.cl-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* ----- collezione: griglia 3x3 come un blocco del sudoku ----- */
+.cl-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    padding: 4px;
+    background: var(--ink);
+}
+
+.cl-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 6px 10px;
+    border: 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+    color: var(--white);
+    background: var(--deep);
+    box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .3), inset 0 4px 0 color-mix(in srgb, var(--cls) 60%, transparent);
+    transition: transform .08s steps(2);
+}
+
+.cl-card:hover { transform: translateY(-3px); }
+.cl-card.focus { background: #3d4a6e; box-shadow: inset 0 0 0 4px var(--cls); }
+.cl-card.selected::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    box-shadow: inset 0 0 0 3px var(--yellow);
+    pointer-events: none;
+}
+
+.cl-num {
+    font-family: var(--font-title);
+    font-size: 28px;
+    color: var(--cls);
+    text-shadow: 3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 3px 0 var(--ink), 0 -3px 0 var(--ink), 0 6px 0 var(--ink);
+}
+
+.cl-name { font-size: 16px; font-weight: 700; }
+
+.cl-lv {
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--yellow);
+}
+
+.cl-badge {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 3px 4px;
+    font-family: var(--font-title);
+    font-size: 6px;
+    color: var(--ink);
+    background: var(--yellow);
+}
+
+.cl-card.locked { filter: grayscale(.85) brightness(.75); }
+.cl-card.locked .cl-num { color: var(--slate); }
+.cl-card.locked .cl-lv { color: var(--mist); }
+
+/* ----- dettaglio classe ----- */
+.cl-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    background: var(--night);
+    box-shadow: 0 0 0 3px var(--ink), inset 4px 0 0 var(--cls);
+}
+
+.cl-detail h3 {
+    margin: 0;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--white);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.cl-detail h3 small {
+    font-family: var(--font-body);
+    font-size: 14px;
+    color: var(--mist);
+    text-shadow: none;
+}
+
+.cl-dnum { color: var(--cls); }
+
+.cl-variants {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cl-variants li {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--deep);
+    box-shadow: 0 0 0 3px var(--ink);
+}
+
+.cl-variants li.locked { opacity: .6; }
+
+.cl-vhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.cl-vhead b { font-size: 17px; color: var(--cls); text-shadow: 2px 2px 0 var(--ink); }
+
+.cl-vlv {
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--yellow);
+    white-space: nowrap;
+}
+
+.cl-variants p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.35;
+    color: var(--mist);
+}
+
+.cl-variants .px-btn { align-self: flex-start; }
+.cl-variants .px-btn[disabled] { cursor: default; opacity: .7; }
+
+.cl-lvbar {
+    height: 8px;
+    background: var(--ink);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.cl-lvbar i {
+    display: block;
+    height: 100%;
+    background: var(--yellow);
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, .35);
+}
+
+/* ----- gacha ----- */
+.gacha-machine {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 10px 6px;
+}
+
+.gacha-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 52px);
+    gap: 4px;
+    padding: 4px;
+    background: var(--ink);
+}
+
+.gacha-grid span {
+    height: 52px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-title);
+    font-size: 20px;
+    color: var(--cls);
+    background: var(--deep);
+    text-shadow: 2px 2px 0 var(--ink);
+    animation: gachaBlink 1.08s steps(1) infinite;
+    animation-delay: var(--d);
+}
+
+@keyframes gachaBlink {
+    0%, 11% { background: var(--cls); color: var(--ink); text-shadow: none; }
+    12%, 100% { background: var(--deep); }
+}
+
+.gacha-info {
+    margin: 0;
+    max-width: 460px;
+    text-align: center;
+    font-size: 15px;
+    line-height: 1.4;
+    color: var(--mist);
+}
+
+.gacha-btns {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.gacha-btns .px-btn { font-size: 11px; }
+.gacha-btns .px-btn[disabled] { filter: grayscale(1) brightness(.7); cursor: not-allowed; transform: none; }
+.gacha-btns .cost { font-size: 9px; opacity: .85; }
+
+.gacha-hint {
+    margin: 0;
+    font-size: 14px;
+    color: #ff8a8a;
+    text-align: center;
+}
+
+/* ----- rivelazione delle carte ----- */
+#gachaReveal {
+    position: fixed;
+    inset: 0;
+    z-index: 1700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(26, 28, 44, .88);
+    font-family: var(--font-body);
+}
+
+.g-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+}
+
+.g-stage h2 {
+    margin: 0;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 22px;
+    color: var(--yellow);
+    text-shadow: 3px 3px 0 var(--ink);
+}
+
+.g-cards {
+    display: grid;
+    grid-template-columns: repeat(1, 150px);
+    gap: 16px;
+    perspective: 800px;
+}
+
+.g-stage.ten .g-cards { grid-template-columns: repeat(5, 120px); }
+
+.g-card {
+    position: relative;
+    height: 190px;
+    transform-style: preserve-3d;
+    transition: transform .36s steps(6);
+    /* "backwards": finita l'entrata, la trasformazione torna libera per la rotazione */
+    animation: cardIn .25s steps(4) backwards;
+    animation-delay: calc(var(--i) * .05s);
+}
+
+.g-stage.ten .g-card { height: 160px; }
+
+@keyframes cardIn {
+    from { transform: translateY(-40px); opacity: 0; }
+}
+
+.g-card.flip { transform: rotateY(180deg); }
+
+.g-back,
+.g-front {
+    position: absolute;
+    inset: 0;
+    backface-visibility: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-shadow: 0 0 0 4px var(--ink), 0 8px 0 4px rgba(0, 0, 0, .45);
+}
+
+.g-back {
+    font-family: var(--font-title);
+    font-size: 40px;
+    color: var(--yellow);
+    background:
+        repeating-linear-gradient(45deg, transparent 0 8px, rgba(0, 0, 0, .18) 8px 16px),
+        var(--plum);
+    text-shadow: 3px 3px 0 var(--ink);
+}
+
+.g-front {
+    transform: rotateY(180deg);
+    padding: 8px;
+    text-align: center;
+    background: var(--deep);
+    box-shadow: 0 0 0 4px var(--ink), inset 0 0 0 4px var(--cls), 0 8px 0 4px rgba(0, 0, 0, .45);
+}
+
+.g-card.rare.flip .g-front { animation: rareGlow .5s steps(2) 3; }
+
+@keyframes rareGlow {
+    50% { box-shadow: 0 0 0 4px var(--ink), inset 0 0 0 4px var(--cls), 0 0 0 10px var(--cls); }
+}
+
+.g-num {
+    font-family: var(--font-title);
+    font-size: 40px;
+    color: var(--cls);
+    text-shadow: 3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 3px 0 var(--ink), 0 -3px 0 var(--ink), 0 6px 0 var(--ink);
+}
+
+.g-stage.ten .g-num { font-size: 30px; }
+
+.g-name { font-size: 16px; font-weight: 700; color: var(--white); }
+.g-var { font-size: 14px; color: var(--cls); }
+
+.g-tag {
+    padding: 3px 5px;
+    font-family: var(--font-title);
+    font-size: 7px;
+    color: var(--ink);
+    background: var(--mist);
+}
+
+.g-card.rare .g-tag { background: var(--yellow); }
+
+.g-lv {
+    font-family: var(--font-title);
+    font-size: 6px;
+    line-height: 1.5;
+    color: var(--mist);
+}
+
+@media (max-width: 720px) {
+    .g-stage.ten .g-cards { grid-template-columns: repeat(2, 120px); }
+    .g-stage { max-height: calc(100vh - 32px); overflow-y: auto; }
+}

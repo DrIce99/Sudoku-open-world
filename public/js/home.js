@@ -31,6 +31,18 @@ const ICONS = {
     skull: {
         map: [".kkkkkkkk.", "kwwwwwwwwk", "kwwwwwwwwk", "kwkkwwkkwk", "kwkkwwkkwk", "kwwwkkwwwk", ".kwwwwwwk.", "..kwkkwk..", "..kkkkkk..", ".........."],
         col: { k: PAL.ink, w: PAL.white }
+    },
+    sword: {
+        map: ["........kk", ".......kwk", "......kwk.", ".....kwk..", ".kk.kwk...", ".kykwk....", "..kyk.....", ".kokyk....", "kok.kk....", "kk........"],
+        col: { k: PAL.ink, w: PAL.white, y: PAL.yellow, o: PAL.orange }
+    },
+    hourglass: {
+        map: ["kkkkkkkkkk", ".kyyyyyyk.", ".kwyyyywk.", "..kwyywk..", "...kwwk...", "...kwwk...", "..kwwywk..", ".kwwyyywk.", ".kyyyyyyk.", "kkkkkkkkkk"],
+        col: { k: PAL.ink, w: PAL.mist, y: PAL.yellow }
+    },
+    clock: {
+        map: ["..kkkkkk..", ".kwwwwwwk.", "kwwwkwwwwk", "kwwwkwwwwk", "kwwwkkkwwk", "kwwwwwwwwk", "kwwwwwwwwk", ".kwwwwwwk.", "..kkkkkk..", ".........."],
+        col: { k: PAL.ink, w: PAL.cyan }
     }
 };
 
@@ -287,6 +299,8 @@ select(0, true);
 let leaving = false;
 function activate(el) {
     if (el.hasAttribute("data-social-open")) return Social.open(el.dataset.socialOpen);
+    if (el.hasAttribute("data-leaderboard-open")) return Leaderboard.open();
+    if (el.hasAttribute("data-classes-open")) return ClassesPanel.open();
     if (leaving) return;
     leaving = true;
     SFX.play(el.dataset.sfx || "confirm");
@@ -297,16 +311,18 @@ function activate(el) {
 items.forEach((el, i) => {
     el.addEventListener("mouseenter", () => { if (sel !== i) select(i); });
     // il pannello amici gestisce il proprio click (Social.init)
-    if (!el.hasAttribute("data-social-open")) el.addEventListener("click", e => { e.preventDefault(); activate(el); });
+    if (!["data-social-open", "data-leaderboard-open", "data-classes-open"].some(a => el.hasAttribute(a))) el.addEventListener("click", e => { e.preventDefault(); activate(el); });
 });
 
 document.addEventListener("keydown", e => {
-    if (window.Social?.isOpen() || e.target.tagName === "INPUT") return;
+    if (window.Social?.isOpen() || window.Leaderboard?.isOpen() || window.ClassesPanel?.isOpen() || e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "arrowdown" || k === "s") { select(sel + 1); e.preventDefault(); }
     else if (k === "arrowup" || k === "w") { select(sel - 1); e.preventDefault(); }
     else if (k === "enter" || k === " ") { activate(items[sel]); e.preventDefault(); }
     else if (k === "c") { Social.open("search"); e.preventDefault(); }
+    else if (k === "l") { Leaderboard.open(); e.preventDefault(); }
+    else if (k === "g") { ClassesPanel.open("gacha"); e.preventDefault(); }
 });
 
 // Tornando indietro dalla cache del browser la tendina resterebbe chiusa
@@ -323,6 +339,11 @@ function countUp(el, target) {
         if (p < 1) requestAnimationFrame(step);
         else { el.textContent = target; el.parentElement.classList.add("bump"); }
     })(t0);
+}
+
+function formatPlayTime(sec) {
+    const m = Math.floor((Number(sec) || 0) / 60);
+    return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 
 const xpNeedForLevel = l => Math.round(100 * Math.pow(1.5, Math.max(1, l) - 1));
@@ -358,6 +379,11 @@ document.addEventListener("DOMContentLoaded", async () => {
                 countUp(document.getElementById("stat-completed"), stats.completedSudokus);
                 countUp(document.getElementById("stat-placed"), stats.placedNumbers);
                 countUp(document.getElementById("stat-wrong"), stats.wrongPlacements);
+                countUp(document.getElementById("stat-boss"), stats.bossKills);
+                countUp(document.getElementById("stat-trials"), stats.trialWins);
+                const t = document.getElementById("stat-time");
+                t.textContent = formatPlayTime(stats.playTimeSec);
+                t.parentElement.classList.add("bump");
             }, 650);
         } else {
             window.location.href = "/login";

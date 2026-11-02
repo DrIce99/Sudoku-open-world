@@ -16,6 +16,8 @@ initializeApp({
 export const db = getDatabase();
 export const auth = getAuth();
 export const serverTimestamp = () => ServerValue.TIMESTAMP;
+// Incremento atomico lato database (contatori di statistiche e classifiche)
+export const increment = n => ServerValue.increment(n);
 
 const userRef = (userId) => db.ref(`users/${userId}`);
 
@@ -35,6 +37,11 @@ function withDefaults(data) {
             completedSudokus: 0,
             placedNumbers: 0,
             wrongPlacements: 0,
+            // statistiche "fighter", aggiornate solo dal server (bossServer.js)
+            bossKills: 0,
+            trialWins: 0,
+            arenaNumbers: 0,
+            playTimeSec: 0,
             ...data?.stats
         }
     };
