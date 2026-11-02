@@ -286,6 +286,7 @@ select(0, true);
 
 let leaving = false;
 function activate(el) {
+    if (el.hasAttribute("data-social-open")) return Social.open(el.dataset.socialOpen);
     if (leaving) return;
     leaving = true;
     SFX.play(el.dataset.sfx || "confirm");
@@ -295,14 +296,17 @@ function activate(el) {
 
 items.forEach((el, i) => {
     el.addEventListener("mouseenter", () => { if (sel !== i) select(i); });
-    el.addEventListener("click", e => { e.preventDefault(); activate(el); });
+    // il pannello amici gestisce il proprio click (Social.init)
+    if (!el.hasAttribute("data-social-open")) el.addEventListener("click", e => { e.preventDefault(); activate(el); });
 });
 
 document.addEventListener("keydown", e => {
+    if (window.Social?.isOpen() || e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "arrowdown" || k === "s") { select(sel + 1); e.preventDefault(); }
     else if (k === "arrowup" || k === "w") { select(sel - 1); e.preventDefault(); }
     else if (k === "enter" || k === " ") { activate(items[sel]); e.preventDefault(); }
+    else if (k === "c") { Social.open("search"); e.preventDefault(); }
 });
 
 // Tornando indietro dalla cache del browser la tendina resterebbe chiusa

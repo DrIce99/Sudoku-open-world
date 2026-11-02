@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/home.css">
+    <link rel="stylesheet" href="/css/social.css">
 </head>
 <body class="px-scanlines">
 
@@ -16,6 +17,7 @@
     <canvas id="bg"></canvas>
 
     <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
+    <button id="searchBtn" class="px-btn yellow" type="button" data-social-open="search" title="Cerca giocatori (C)">CERCA</button>
 
     <main class="home">
         <!-- LOGO -->
@@ -47,6 +49,9 @@
                 <a href="/game" class="px-btn green menu-item play" data-sfx="confirm">
                     <span class="cursor">▶</span>ENTRA NEL MONDO
                 </a>
+                <a href="#" class="px-btn yellow menu-item" data-social-open="friends">
+                    <span class="cursor">▶</span>AMICI <span class="badge" data-social-badge hidden></span>
+                </a>
                 <a href="/logout" class="px-btn red menu-item" data-sfx="select">
                     <span class="cursor">▶</span>LOG OUT
                 </a>
@@ -75,7 +80,7 @@
             </section>
         </div>
 
-        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE</p>
+        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE · <kbd>C</kbd> CERCA GIOCATORI</p>
     </main>
 
     <!-- Transizione a quadrati pixel verso il gioco -->
@@ -83,5 +88,9 @@
 
     <script src="/js/sfx.js"></script>
     <script src="/js/home.js"></script>
+    <script src="/js/social.js"></script>
+    <script>
+        Social.init({ mode: "home" });
+    </script>
 </body>
 </html>

@@ -950,6 +950,8 @@ function updateBars() {
     lvlEl.textContent = "LV " + level;
     const hpText = document.getElementById("hpText");
     if (hpText) hpText.textContent = Math.max(0, hp) + " / " + maxHp;
+    // HP e livello vengono mostrati ai compagni di party
+    window.Social?.reportStats(hp, maxHp, level);
 }
 function gainXp(n) {
     xp += n;
@@ -1147,6 +1149,8 @@ document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") {
         return;
     }
+    // Pannello amici/party aperto: i tasti non muovono il giocatore
+    if (window.Social?.isOpen()) return;
     const k = e.key.toLowerCase();
     if (mapMode) {
         if (k === "m" || k === "escape") { closeMap(); return; }
@@ -1173,6 +1177,9 @@ document.addEventListener("keydown", e => {
         return;
     }
     if (k === "n") { toggleNotes(); return; }
+    if (k === "c") { window.Social?.open("search"); e.preventDefault(); return; }
+    if (k === "f") { window.Social?.open("friends"); return; }
+    if (k === "p") { window.Social?.open("party"); return; }
     const mv = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] }[k];
     if (mv) { tryMove(mv[0], mv[1]); e.preventDefault(); return; }
     if (k >= "1" && k <= "9") { pressDigit(+k); e.preventDefault(); return; }
@@ -1299,6 +1306,7 @@ let myPlayerId = null;
 // Colore con cui GLI ALTRI ti vedono (marker + numeri che scrivi).
 // Deve essere diverso dal blu del TUO player/numeri (var(--user) = #1d4ed8 in CSS),
 // altrimenti tutti i giocatori sembrano avere lo stesso colore agli occhi altrui.
+// Il server assegna il colore (messaggio "init"), stabile per ogni playerId
 let myColor = "#7dd3fc"; // azzurro più chiaro
 const otherPlayersEls = new Map();
 let worldInitialized = false;
@@ -1320,6 +1328,7 @@ function updateOtherPlayers(list) {
         }
 
         el.style.setProperty('--p-color', p.color || '#38bdf8');
+        el.classList.toggle("party", !!window.Social?.isPartyMember(p.playerId));
         el.style.left = p.x * CELL + "px";
         el.style.top = p.y * CELL + "px";
 
@@ -1542,6 +1551,7 @@ function connectWebSocket() {
 
             lastSentX = player.x;
             lastSentY = player.y;
+            window.Social?.onConnected();
 
             for (const key of zones.keys()) {
                 const [zx, zy] = key.split(',').map(Number);
@@ -1552,6 +1562,7 @@ function connectWebSocket() {
         ws.onclose = (e) => {
             ws = null;
             updateOtherPlayers([]);
+            window.Social?.onDisconnected();
 
             // 4000 = lo stesso account è entrato da un'altra scheda: non riconnettersi
             if (closing) return;
@@ -1567,9 +1578,11 @@ function connectWebSocket() {
         ws.onmessage = (event) => {
             let msg;
             try { msg = JSON.parse(event.data); } catch { return; }
+            window.Social?.onMessage(msg);
 
             if (msg.type === "init") {
                 myId = msg.myId;
+                if (msg.myColor) myColor = msg.myColor;
 
                 if (msg.myPlayerId) {
                     myPlayerId = msg.myPlayerId;

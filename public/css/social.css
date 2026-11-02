@@ -1,0 +1,491 @@
+/* ============================================================
+   SOCIAL — pannello amici/party, inviti, HUD party, indicatori
+   ============================================================ */
+.badge {
+    display: inline-block;
+    min-width: 18px;
+    margin-left: 6px;
+    padding: 3px 4px 2px;
+    font-family: var(--font-title);
+    font-size: 8px;
+    line-height: 1;
+    text-align: center;
+    color: var(--white);
+    background: #e43b44;
+    box-shadow: 0 0 0 2px var(--ink);
+    text-shadow: none;
+}
+
+.badge:empty,
+.badge[hidden] { display: none; }
+
+.social-btn {
+    padding: 8px 10px;
+    font-size: 9px;
+}
+
+/* ----- pannello ----- */
+#socialPanel {
+    position: fixed;
+    inset: 0;
+    z-index: 1500;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(26, 28, 44, .6);
+    font-family: var(--font-body);
+}
+
+#socialPanel.hidden { display: none; }
+
+.social-box {
+    width: min(520px, 100%);
+    max-height: min(640px, calc(100vh - 32px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+    animation: socialIn .25s steps(4);
+}
+
+@keyframes socialIn {
+    from { transform: translateY(30px) scale(.94); opacity: 0; }
+    to { transform: none; opacity: 1; }
+}
+
+.social-box header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.social-box h2 {
+    margin: 0;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 16px;
+    color: var(--yellow);
+    text-shadow: 3px 3px 0 var(--ink);
+}
+
+.social-close {
+    width: 36px;
+    height: 32px;
+    padding: 0;
+    font-size: 11px;
+}
+
+.social-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+}
+
+.social-tabs .px-btn {
+    padding: 10px 2px;
+    font-size: 8px;
+}
+
+.social-tabs .px-btn.is-selected {
+    --btn-bg: var(--sky);
+    transform: translateY(calc(var(--px) * -1));
+}
+
+.social-body {
+    flex: 1;
+    min-height: 220px;
+    overflow-y: auto;
+    padding: 8px 6px 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.social-body h3 {
+    margin: 4px 0 0;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 9px;
+    color: var(--cyan);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.social-empty {
+    margin: 0;
+    padding: 12px;
+    font-size: 16px;
+    line-height: 1.4;
+    color: var(--mist);
+    background: var(--ink);
+}
+
+.social-me {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: var(--ink);
+}
+
+.social-me span {
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--mist);
+}
+
+.social-me strong {
+    flex: 1;
+    font-size: 18px;
+    color: var(--yellow);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.social-form {
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+}
+
+.social-form input {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 0;
+    outline: none;
+    background: var(--ink);
+    color: var(--white);
+    font-family: var(--font-body);
+    font-size: 17px;
+    box-shadow: inset 0 0 0 3px var(--slate);
+}
+
+.social-form input:focus { box-shadow: inset 0 0 0 3px var(--sky); }
+
+.social-form .px-btn {
+    padding: 10px 12px;
+    font-size: 9px;
+}
+
+.px-btn.small {
+    padding: 8px 9px;
+    font-size: 8px;
+    gap: 0;
+}
+
+.social-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.social-list li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--night);
+    box-shadow: 0 0 0 3px var(--ink), inset 0 -3px 0 rgba(0, 0, 0, .3);
+}
+
+.social-list .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.social-list .who b {
+    font-size: 17px;
+    color: var(--white);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.social-list .who b.pname { color: var(--p-color, var(--white)); text-shadow: 2px 2px 0 var(--ink); }
+
+.social-list .who small {
+    font-size: 13px;
+    color: var(--mist);
+}
+
+.social-list .tag {
+    padding: 4px 6px;
+    font-family: var(--font-title);
+    font-size: 7px;
+    line-height: 1.4;
+    color: var(--ink);
+    background: var(--cyan);
+    box-shadow: 0 0 0 2px var(--ink);
+    text-align: center;
+}
+
+.social-list .tag.muted {
+    color: var(--mist);
+    background: var(--deep);
+}
+
+.row-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    flex: none;
+}
+
+.search-view {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.social-form input[type="search"]::-webkit-search-cancel-button { filter: invert(1); }
+
+.dot {
+    flex: none;
+    width: 10px;
+    height: 10px;
+    background: var(--slate);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.dot.on {
+    background: var(--lime);
+    animation: dotBlink 1.2s steps(2) infinite;
+}
+
+@keyframes dotBlink { 50% { background: var(--green); } }
+
+.crown { color: var(--yellow); }
+
+.social-leave {
+    align-self: flex-start;
+    padding: 10px 12px;
+    font-size: 9px;
+}
+
+/* mini barra HP (lista party e HUD) */
+.mini-hp {
+    position: relative;
+    height: 8px;
+    background: var(--ink);
+    box-shadow: 0 0 0 2px var(--ink);
+    overflow: hidden;
+}
+
+.mini-hp i {
+    display: block;
+    height: 100%;
+    background: #e43b44;
+    box-shadow: inset 0 2px 0 rgba(255, 255, 255, .35);
+    transition: width .3s steps(5);
+}
+
+.mini-hp.unknown i {
+    background: repeating-linear-gradient(90deg, var(--slate) 0 4px, transparent 4px 8px);
+}
+
+/* ----- inviti al party ----- */
+#partyInvites {
+    position: fixed;
+    right: 18px;
+    bottom: 70px;
+    z-index: 1400;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    font-family: var(--font-body);
+}
+
+.invite-card {
+    width: 270px;
+    padding: 12px 14px 10px;
+    animation: socialIn .25s steps(4);
+}
+
+.invite-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    background: var(--p-color);
+}
+
+.invite-title {
+    font-family: var(--font-title);
+    font-size: 9px;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
+    animation: socialBlink .5s steps(1) 4;
+}
+
+.invite-card p {
+    margin: 8px 0 12px;
+    font-size: 16px;
+}
+
+.invite-card p b { color: var(--p-color); }
+
+.invite-btns {
+    display: flex;
+    gap: 14px;
+}
+
+.invite-time {
+    margin-top: 12px;
+    height: 4px;
+    background: var(--ink);
+}
+
+.invite-time i {
+    display: block;
+    height: 100%;
+    background: var(--lime);
+    animation: inviteTime linear forwards;
+}
+
+@keyframes inviteTime { from { width: 100%; } to { width: 0%; } }
+@keyframes socialBlink { 50% { opacity: .2; } }
+
+/* ----- notifiche nella home (in gioco si usano i toast del gioco) ----- */
+#socialToasts {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1600;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.social-toast {
+    padding: 8px 14px;
+    font-family: var(--font-body);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--yellow);
+    box-shadow: 0 0 0 3px var(--ink), 0 6px 0 3px rgba(26, 28, 44, .4);
+    animation: socialIn .2s steps(3);
+}
+
+.social-toast.bad { background: #e43b44; color: var(--white); }
+
+/* ----- HUD del party: sopra la propria barra HP ----- */
+#partyHud {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-bottom: 10px;
+    margin-bottom: 2px;
+    border-bottom: 3px solid var(--ink);
+}
+
+#partyHud[hidden] { display: none; }
+
+.pm-title {
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--cyan);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.pm-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 44px;
+    align-items: center;
+    gap: 10px;
+}
+
+.pm-name {
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--p-color);
+    text-shadow: 2px 2px 0 var(--ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.pm-name .crown { margin-right: 4px; }
+
+.pm-lv {
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--yellow);
+    text-align: right;
+}
+
+.pm-row.off { opacity: .55; }
+.pm-row.off .pm-lv { color: var(--mist); }
+.pm-row.hurt .mini-hp { animation: hudShake .08s steps(2) 4; }
+.pm-row.hurt .mini-hp i { filter: brightness(2); }
+
+/* ----- indicatori dei compagni fuori schermo ----- */
+#partyPointers {
+    position: fixed;
+    inset: 0;
+    z-index: 998;
+    pointer-events: none;
+}
+
+.party-ptr {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    transform: translate(-50%, -50%);
+}
+
+.party-ptr .arrow {
+    font-family: var(--font-title);
+    font-size: 20px;
+    line-height: 1;
+    color: var(--p-color);
+    text-shadow: 3px 0 0 var(--ink), -3px 0 0 var(--ink), 0 3px 0 var(--ink), 0 -3px 0 var(--ink);
+}
+
+.party-ptr .lbl {
+    margin-top: 6px;
+    padding: 3px 8px;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    color: var(--ink);
+    background: var(--p-color);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.party-ptr.off { opacity: .5; }
+
+/* compagni di party nel mondo: cornice più spessa e stellina sul nome */
+.other-player.party {
+    border-width: 5px;
+    animation: partyGlow 1s steps(2) infinite;
+}
+
+.other-player.party .p-name::before { content: "★ "; }
+
+@keyframes partyGlow {
+    50% { box-shadow: 0 0 0 3px var(--ink), inset 0 0 0 3px var(--ink), 0 0 0 7px var(--p-color); }
+}

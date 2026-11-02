@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/game.css">
     <link rel="stylesheet" href="/css/fx.css">
+    <link rel="stylesheet" href="/css/social.css">
 </head>
 <body>
 
@@ -19,6 +20,8 @@
         <div class="player-info">
             <a href="/" class="btn-back px-btn ghost">◀ HOME</a>
             <span id="hud-username">Giocatore</span>
+            <button class="px-btn ghost social-btn" type="button" data-social-open="search" title="Cerca giocatori (C)">CERCA</button>
+            <button class="px-btn yellow social-btn" type="button" data-social-open="friends" title="Amici (F)">AMICI <span class="badge" data-social-badge hidden></span></button>
         </div>
         <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
     </header>
@@ -39,6 +42,8 @@
             <kbd>1-9</kbd> scrivi numero<br>
             <kbd>N</kbd> note a matita<br>
             <kbd>R</kbd> blocca/sblocca vista<br>
+            <kbd>C</kbd> cerca giocatori<br>
+            <kbd>F</kbd> amici &nbsp; <kbd>P</kbd> party<br>
             <kbd>M</kbd> mappa &nbsp; <kbd>Tab</kbd> mostra/nascondi aiuto
         </p>
     </aside>
@@ -95,5 +100,9 @@
     <script src="/js/fx.js"></script>
     <script src="/js/game.js"></script>
     <script src="/js/bossSystem.js"></script>
+    <script src="/js/social.js"></script>
+    <script>
+        Social.init({ mode: "game", getWs: () => ws, getMe: () => myPlayerId });
+    </script>
 </body>
 </html>
