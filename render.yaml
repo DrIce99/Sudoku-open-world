@@ -1,0 +1,18 @@
+# Configurazione per Render (render.com): New > Blueprint e scegli questa repo.
+# Il server deve restare acceso (WebSocket e stato del mondo in memoria), quindi è un
+# "web service" Node, non una funzione serverless.
+services:
+  - type: web
+    name: infinitedoku
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SESSION_SECRET
+        generateValue: true
+      # Incolla qui il contenuto di serviceAccountKey.json (tutto il JSON)
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false

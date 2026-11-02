@@ -3,9 +3,11 @@ import { getDatabase, ServerValue } from "firebase-admin/database";
 import { getAuth } from "firebase-admin/auth";
 import { readFileSync } from "fs";
 
-// Carica il file di credenziali serviceAccountKey.json
+// Credenziali: in produzione dalla variabile d'ambiente FIREBASE_SERVICE_ACCOUNT (il
+// contenuto JSON del file), in locale dal file serviceAccountKey.json (escluso da git)
 const serviceAccount = JSON.parse(
-    readFileSync(new URL("./serviceAccountKey.json", import.meta.url))
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    readFileSync(new URL("./serviceAccountKey.json", import.meta.url), "utf8")
 );
 
 initializeApp({

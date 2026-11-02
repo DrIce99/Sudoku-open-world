@@ -11,7 +11,9 @@ import { createBossSystem } from "./bossServer.js";
 import { createAbilitySystem } from "./abilities.js";
 import { CLASS_CATALOG, PULL_COST, TEN_PULL_COST, variantKey, findVariant, levelFromCopies, rollPull } from "./classes.js";
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+// Disattiva la verifica dei certificati HTTPS di tutto il server: solo in locale, mai in
+// produzione (NODE_ENV=production)
+if (process.env.NODE_ENV !== "production") process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,7 +27,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
 const sessionMiddleware = session({
-    secret: "sudoku_secret_key_change_me",
+    secret: process.env.SESSION_SECRET || "sudoku_secret_key_change_me",
     resave: false,
     saveUninitialized: false,
     cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 ore
@@ -1670,6 +1672,8 @@ async function backfillGeneralLeaderboard() {
 }
 backfillGeneralLeaderboard();
 
-server.listen(3000, () => {
-    console.log("Server attivo su http://localhost:3000");
+// La piattaforma di hosting (Render, Railway, Fly.io...) indica la porta in PORT
+const PORT = Number(process.env.PORT) || 3000;
+server.listen(PORT, () => {
+    console.log(`Server attivo su http://localhost:${PORT}`);
 });
