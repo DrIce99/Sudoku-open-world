@@ -62,7 +62,7 @@
         else if (left > 0) info = `ricarica ${(left / 1000).toFixed(1)}s`;
         else if (st.kind === "charge" && st.active) info = `carica ${st.stored}/${st.cap}`;
         else if (st.kind === "toggle" && st.active) info = "ATTIVA";
-        else if (st.kind === "target") info = targets.length ? `4 in (${targets[targetIdx % targets.length].x}, ${targets[targetIdx % targets.length].y})` : "nessun tuo 4 vicino";
+        else if (st.kind === "target") info = targets.length ? `4 in (${targets[targetIdx % targets.length].x}, ${targets[targetIdx % targets.length].y})` : "nessun 4 vicino";
         else if (st.kind === "click") info = "clicca una cella";
         else if (st.kind === "shape") info = st.shape ? `aura: ${st.shape}` : "scrivi un 7 nell'arena";
         else if (st.kind === "passive") info = "sempre attiva";
@@ -83,10 +83,16 @@
 
     function renderShield() {
         const el = document.getElementById("shieldTag");
-        if (!el) return;
+        const bar = document.getElementById("shieldFill");
+        if (!el || !bar) return;
         const total = shieldTotal();
         el.hidden = !total;
         el.textContent = "+" + total;
+        // nella barra: dopo la vita, oppure sovrapposto alla sua fine se insieme superano il massimo
+        bar.hidden = !total;
+        const w = Math.min(1, total / maxHp), life = Math.max(0, hp / maxHp);
+        bar.style.width = w * 100 + "%";
+        bar.style.left = Math.min(life, 1 - w) * 100 + "%";
     }
 
     // Lo scudo assorbe il danno (prima quello che scade prima); restituisce quanto ha assorbito
@@ -104,7 +110,7 @@
         return absorbed;
     }
 
-    /* ---------------- Salto (4a): i propri 4 vicini, scelti con la rotella ---------------- */
+    /* ---------------- Salto (4a): i 4 vicini (iniziali o scritti da chiunque), scelti con la rotella ---------------- */
     let targets = [], targetIdx = 0;
     const marker = document.createElement("div");
     marker.className = "tp-target";
@@ -117,10 +123,10 @@
         for (let zy = curZone.y - 15; zy <= curZone.y + 15; zy++) {
             for (let zx = curZone.x - 15; zx <= curZone.x + 15; zx++) {
                 const z = getZone(zx, zy);
-                if (!z || z.empty || !z.own) continue;
+                if (!z || z.empty) continue;
                 for (let li = 0; li < 9; li++) {
                     const x = zx * 3 + li % 3, y = zy * 3 + Math.floor(li / 3);
-                    if ((z.own & (1 << li)) && (z.wr & (1 << li)) && z.v[li] === 4 && !(x === player.x && y === player.y)) found.push({ x, y });
+                    if (z.v[li] === 4 && ((z.rev | z.wr) & (1 << li)) && !(x === player.x && y === player.y)) found.push({ x, y });
                 }
             }
         }
@@ -153,8 +159,9 @@
     });
 
     /* ---------------- portali (4b) ---------------- */
-    let portalEls = [];
+    let portalEls = [], portalCells = new Set();
     function renderPortals(list) {
+        portalCells = new Set(list.flatMap(p => [p.a, p.b].map(c => c.x + "," + c.y)));
         portalEls.forEach(el => el.remove());
         portalEls = list.flatMap(p => [p.a, p.b].map(c => {
             const el = document.createElement("div");
@@ -188,8 +195,11 @@
     }
 
     window.Abilities = {
-        use, onMessage, absorb,
+        use, onMessage, absorb, renderShield,
         key: () => st.key || null,
-        freeMove: () => st.key === "6a"
+        // Celle con un numero in cui si può entrare: tutte col Passo libero (6a), i capi dei
+        // portali (4b), i 3 per il Tank (3a/3b) e, nell'arena col Bastione attivo, per tutti
+        canEnter: (x, y) => st.key === "6a" || portalCells.has(x + "," + y) || (cellShown(x, y) === 3 && (st.key === "3a" || st.key === "3b" ||
+            [...(window.bossManager?.bosses.values() || [])].some(b => b.bastion && b.containsCell(x, y))))
     };
 })();

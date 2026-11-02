@@ -374,6 +374,10 @@ document.addEventListener("DOMContentLoaded", async () => {
                 document.getElementById("xp-fill").style.width = Math.min(100, xp / need * 100) + "%";
             }, 500);
 
+            const bonus = player.bonus || {};
+            document.getElementById("player-bonus").textContent =
+                `BONUS  ATK +${+(Number(bonus.atk) || 0).toFixed(1)} · HP +${+(Number(bonus.hp) || 0).toFixed(1)}`;
+
             const stats = player.stats || {};
             setTimeout(() => {
                 countUp(document.getElementById("stat-completed"), stats.completedSudokus);

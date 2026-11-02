@@ -14,9 +14,11 @@
 //   boss_despawned  { bossId }
 // Dai client: player_died { x, y } (serve alla Survival Trial).
 //
-// A fine scontro onFinished({ type, result, participants, arenaNumbers }) riceve
-// l'esito ("defeated" | "failed" | "despawned"), chi ha partecipato e quanti numeri
-// ha scritto ognuno nell'arena: server.js lo usa per statistiche e classifiche.
+// A fine scontro onFinished({ type, result, participants, contributors, arenaNumbers })
+// riceve l'esito ("defeated" | "failed" | "despawned"), chi ha partecipato (è stato
+// nell'arena), chi ha contribuito (numeri scritti, danni o congelamento con le abilità)
+// e quanti numeri ha scritto ognuno: server.js lo usa per statistiche, classifiche e
+// per dividere il bonus di sconfitta fra i contributori.
 //
 // Abilità delle classi (abilities.js): damageBoss() / stun() e strikeMods(b), che
 // dice quali protezioni valgono nell'arena al momento del colpo:
@@ -136,6 +138,7 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
             attackTimer: 0, attacking: false,
             units: new Set(), windowDone: false,
             participants: new Set(),
+            contributors: new Set(),   // chi ha fatto qualcosa contro il boss (non solo presenza)
             arenaNumbers: new Map(),   // playerId -> numeri scritti nell'arena
             lastNearby: now
         };
@@ -164,7 +167,7 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
     /* ---------------- esito ---------------- */
     function finished(b, result) {
         try {
-            onFinished({ type: b.type, result, participants: [...b.participants], arenaNumbers: b.arenaNumbers });
+            onFinished({ type: b.type, result, participants: [...b.participants], contributors: [...b.contributors], arenaNumbers: b.arenaNumbers });
         } catch (err) {
             console.error("Errore esito boss:", err);
         }
@@ -260,6 +263,8 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
                 // i numeri iniziali (comprese le celle immortali) non sono "writes": restano
                 const w = zone.writes[`${lx},${ly}`];
                 if (!w || mods.protectValues.includes(w.val)) continue;
+                // l'Aura del Tank (3b) protegge i numeri nel suo 3x3
+                if (mods.auras.some(a => Math.abs(a.x - x) <= 1 && Math.abs(a.y - y) <= 1)) continue;
                 delete zone.writes[`${lx},${ly}`];
                 broadcast({ type: "write", zoneKey: `${zx},${zy}`, cx: lx, cy: ly, val: 0, color: null });
             }
@@ -339,6 +344,7 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
             if (!containsCell(b, x, y)) continue;
             const t = TYPES[b.type];
             b.participants.add(p.playerId);
+            b.contributors.add(p.playerId);
             b.arenaNumbers.set(p.playerId, (b.arenaNumbers.get(p.playerId) || 0) + 1);
 
             if (b.type === "survival_trial") {
@@ -379,7 +385,10 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
     function damageBoss(b, amount, p, source) {
         if (!bosses.has(b.id) || !(amount > 0)) return 0;
         if (stunned(b)) amount *= STUN_DAMAGE_MULT;
-        if (p) b.participants.add(p.playerId);
+        if (p) {
+            b.participants.add(p.playerId);
+            b.contributors.add(p.playerId);
+        }
         broadcast({ type: "boss_hurt", bossId: b.id, amount: Math.round(amount), unit: source, by: p?.name || null });
         if (b.type === "sudoku_hp") damage(b, amount);
         else {
@@ -392,7 +401,10 @@ export function createBossSystem({ zoneState, worldPlayers, broadcast, onFinishe
     function stun(b, ms, p) {
         if (!bosses.has(b.id)) return;
         b.stunUntil = Math.max(b.stunUntil || 0, Date.now() + ms);
-        if (p) b.participants.add(p.playerId);
+        if (p) {
+            b.participants.add(p.playerId);
+            b.contributors.add(p.playerId);
+        }
         broadcast({ type: "boss_stunned", bossId: b.id, ms, by: p?.name || null });
     }
 

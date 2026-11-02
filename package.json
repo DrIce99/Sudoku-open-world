@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "test-classes": "node server.js --all-classes",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

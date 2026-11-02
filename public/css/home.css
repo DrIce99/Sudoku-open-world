@@ -285,6 +285,14 @@ body {
     text-shadow: 2px 2px 0 var(--ink);
 }
 
+.bonus-line {
+    margin-top: 8px;
+    font-family: var(--font-title);
+    font-size: 8px;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
 .menu-item.classes-item {
     --btn-bg: #8b4fc2;
 }

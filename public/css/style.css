@@ -332,6 +332,16 @@ aside#tips p { margin: 0; }
     background: #e43b44;
 }
 
+/* scudo (classe 9): segmento azzurro dopo la vita, sovrapposto alla fine se la supera */
+#shieldFill {
+    position: absolute;
+    top: 0;
+    background: #73eff7;
+    transition: left .3s steps(6), width .3s steps(6);
+}
+
+#shieldFill[hidden] { display: none; }
+
 #xpFill {
     background: var(--lime);
     width: 0%;
@@ -348,7 +358,7 @@ aside#tips p { margin: 0; }
     font-family: var(--font-title);
     font-size: 8px;
     color: var(--ink);
-    background: #f27ab3;
+    background: #73eff7;
     padding: 3px 4px;
     box-shadow: 0 0 0 2px var(--ink);
 }
@@ -437,6 +447,8 @@ aside#tips p { margin: 0; }
 
 /* classe scelta e Frammenti */
 .hud-meta {
+    flex-wrap: wrap;
+    row-gap: 6px;
     justify-content: space-between;
     padding-top: 8px;
     border-top: 3px solid var(--ink);
@@ -450,6 +462,19 @@ aside#tips p { margin: 0; }
     color: var(--cls, var(--mist));
     text-shadow: 2px 2px 0 var(--ink);
 }
+
+/* il bonus va su una riga sua, sotto classe e Frammenti */
+#hudBonus {
+    order: 3;
+    width: 100%;
+    font-family: var(--font-body);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+#hudBonus[hidden] { display: none; }
 
 #hudGems {
     font-family: var(--font-title);

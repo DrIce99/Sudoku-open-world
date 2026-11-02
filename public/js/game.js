@@ -508,6 +508,16 @@ function sendPlayerMove() {
     }
 }
 
+// Sudoku 9x9 attivo (quello bloccato con R o l'arena del boss): serve al server per
+// gli indizi della Rigenerazione (classe 5)
+let lastSentView = "";
+setInterval(() => {
+    const v = winZone.x + "," + winZone.y;
+    if (v === lastSentView || !ws || ws.readyState !== 1) return;
+    lastSentView = v;
+    ws.send(JSON.stringify({ type: "view", zx: winZone.x, zy: winZone.y }));
+}, 500);
+
 function placePlayer() {
     playerEl.style.left = player.x * CELL + "px";
     playerEl.style.top = player.y * CELL + "px";
@@ -541,6 +551,9 @@ function forcePosition(x, y) {
     player.y = y;
     curZone = nz;
     placePlayer();
+
+    // portati fuori dalla vista bloccata con R (salto, portale, spinta): il blocco si scioglie
+    if (!follow && !inLock(x, y) && !window.bossManager?.isBossFightActive()) toggleLock();
 
     if (follow) recenter(true);
     checkUnits();
@@ -577,7 +590,7 @@ function tryMove(dx, dy) {
             return;
         }
 
-        if (cellShown(nx, ny) !== 0 && !window.Abilities?.freeMove()) {
+        if (cellShown(nx, ny) !== 0 && !window.Abilities?.canEnter(nx, ny)) {
             bump();
             return;
         }
@@ -595,8 +608,8 @@ function tryMove(dx, dy) {
         return;
     }
 
-    // Passo libero (classe 6): si cammina anche sopra i numeri
-    if (cellShown(nx, ny) !== 0 && !window.Abilities?.freeMove()) {
+    // Passo libero (classe 6): si cammina sopra i numeri; Tank (classe 3): sopra i 3
+    if (cellShown(nx, ny) !== 0 && !window.Abilities?.canEnter(nx, ny)) {
         bump();
         return;
     }
@@ -942,12 +955,41 @@ function xpNeedForLevel(l) {
     return Math.round(100 * Math.pow(1.5, Math.max(1, l) - 1));
 }
 
+// Bonus permanenti dalla sconfitta dei boss (ATK) e delle Survival Trial (HP), divisi
+// fra chi ha contribuito. Arrivano dal server (messaggio "bonus" e /api/player).
+let bonusHp = 0, bonusAtk = 0;
+
 function maxHpForLevel(l) {
-    return Math.round(100 * Math.pow(1.05, Math.max(1, l) - 1));
+    return Math.round(100 * Math.pow(1.05, Math.max(1, l) - 1) + bonusHp);
 }
 
 function baseAtkForLevel(l) {
-    return 10 + Math.floor((Math.max(1, l) - 1) * 2);
+    return 10 + Math.floor((Math.max(1, l) - 1) * 2) + bonusAtk;
+}
+
+function applyBonus(msg) {
+    bonusAtk = Number(msg.atk) || 0;
+    bonusHp = Number(msg.hp) || 0;
+    const oldMax = maxHp;
+    maxHp = maxHpForLevel(level);
+    baseAtk = baseAtkForLevel(level);
+    // la vita massima in più si riceve anche come vita attuale
+    if (maxHp > oldMax) hp = Math.min(maxHp, hp + (maxHp - oldMax));
+    updateBars();
+
+    const el = document.getElementById("hudBonus");
+    if (el) {
+        el.hidden = !(bonusAtk || bonusHp);
+        el.textContent = `ATK +${+bonusAtk.toFixed(1)} · HP +${+bonusHp.toFixed(1)}`;
+    }
+
+    const g = msg.gained;
+    if (g) {
+        const label = g.field === "atk" ? "ATK" : "HP";
+        const split = g.split > 1 ? ` (diviso fra ${g.split})` : "";
+        toast(`Bonus sconfitta: +${g.amount} ${label}${split}`, "gold");
+        window.FX?.banner(`+${g.amount} ${label}`, { cls: "gold", sub: "BONUS PERMANENTE", dur: 1600 });
+    }
 }
 
 function applyDerivedStats() {
@@ -962,6 +1004,7 @@ function applyDerivedStats() {
 const hpFill = document.getElementById("hpFill"), xpFill = document.getElementById("xpFill"), lvlEl = document.getElementById("lvl");
 function updateBars() {
     hpFill.style.width = Math.max(0, hp / maxHp * 100) + "%";
+    window.Abilities?.renderShield();
     xpFill.style.width = Math.min(100, xp / xpNeed * 100) + "%";
     lvlEl.textContent = "LV " + level;
     const hpText = document.getElementById("hpText");
@@ -1478,6 +1521,8 @@ async function initGame() {
         loadSelectedClass();
 
         playerStats = { ...playerStats, ...data };
+        bonusAtk = Number(data.bonus?.atk) || 0;
+        bonusHp = Number(data.bonus?.hp) || 0;
 
         // Applica progresso reale prima di newWorld(false)
         level = Math.max(1, Math.floor(Number(data.level) || 1));
@@ -1570,6 +1615,7 @@ function connectWebSocket() {
 
             lastSentX = player.x;
             lastSentY = player.y;
+            lastSentView = "";
             window.Social?.onConnected();
 
             for (const key of zones.keys()) {
@@ -1627,8 +1673,11 @@ function connectWebSocket() {
             else if (msg.type === "pushed_other") {
                 window.FX?.pushedOther();
             }
+            else if (msg.type === "bonus") {
+                applyBonus(msg);
+            }
             else if (msg.type === "wallet") {
-                updateWallet(msg.currency, msg.gained);
+                updateWallet(msg.currency, msg.gained, msg.note);
             }
             else if (msg.type === "write") {
                 applyRemoteWrite(msg);
@@ -1649,13 +1698,14 @@ function connectWebSocket() {
 }
 
 // Frammenti (valuta del gacha) nell'HUD
-function updateWallet(currency, gained = 0) {
+function updateWallet(currency, gained = 0, note = null) {
     const el = document.getElementById("hudGems");
     if (!el) return;
     el.textContent = "◆ " + currency;
     el.parentElement.hidden = false;
     if (gained) {
         window.FX?.floatText(player.x, player.y + 0.4, `+${gained} ◆`, "gem");
+        if (note) toast(`+${gained} ◆ — completato: ${note}`, "gold");
         el.classList.remove("bump");
         void el.offsetWidth;
         el.classList.add("bump");

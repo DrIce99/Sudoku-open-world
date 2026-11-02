@@ -124,6 +124,7 @@ function normalizeProgress(data) {
     delete clean.collection;
     delete clean.classTime;
     clean.wallet = { currency: Math.max(0, Math.floor(Number(clean.wallet?.currency) || 0)) };
+    clean.bonus = { atk: Number(clean.bonus?.atk) || 0, hp: Number(clean.bonus?.hp) || 0 };
 
     return clean;
 }
@@ -593,9 +594,48 @@ async function uidForPlayerId(playerId) {
     return snap.exists() ? snap.val().uid : null;
 }
 
-// Esito di uno scontro: aggiorna statistiche e classifica fighters dei partecipanti
-async function recordBossOutcome({ type, result, participants, arenaNumbers }) {
+// ==================== BONUS DI SCONFITTA ====================
+// Alla vittoria un bonus fisso viene diviso in parti uguali fra chi ha contribuito
+// (numeri scritti nell'arena, danni o congelamento con le abilità) e si aggiunge a una
+// statistica permanente: users/<uid>/bonus/atk dai boss, users/<uid>/bonus/hp dalle
+// Survival Trial. L'ATK bonus potenzia le abilità (abilities.js), l'HP bonus la vita massima.
+const DEFEAT_BONUS = {
+    sudoku_hp: { field: "atk", pool: 4 },
+    survival_trial: { field: "hp", pool: 20 }
+};
+const round2 = n => Math.round(n * 100) / 100;
+
+async function loadBonus(p) {
+    if (!p.authUserId) return;
+    const b = (await db.ref(`users/${p.authUserId}/bonus`).get()).val() || {};
+    p.bonus = { atk: Number(b.atk) || 0, hp: Number(b.hp) || 0 };
+    sendJson(p, { type: "bonus", ...p.bonus });
+}
+
+async function awardDefeatBonus(type, contributors) {
+    const cfg = DEFEAT_BONUS[type];
+    if (!cfg || !contributors.length) return {};
+    const share = round2(cfg.pool / contributors.length);
     const updates = {};
+    for (const pid of contributors) {
+        const uid = await uidForPlayerId(pid);
+        if (!uid) continue;
+        updates[`users/${uid}/bonus/${cfg.field}`] = increment(share);
+        // chi è connesso lo vede subito
+        for (const p of Object.values(players)) {
+            if (p.authUserId !== uid) continue;
+            p.bonus ??= { atk: 0, hp: 0 };
+            p.bonus[cfg.field] = round2(p.bonus[cfg.field] + share);
+            sendJson(p, { type: "bonus", ...p.bonus, gained: { field: cfg.field, amount: share, split: contributors.length } });
+        }
+    }
+    return updates;
+}
+
+// Esito di uno scontro: aggiorna statistiche e classifica fighters dei partecipanti
+// e divide il bonus di sconfitta fra i contributori
+async function recordBossOutcome({ type, result, participants, contributors = [], arenaNumbers }) {
+    const updates = result === "defeated" ? await awardDefeatBonus(type, contributors) : {};
     const winField = type === "survival_trial" ? "trialWins" : "bossKills";
 
     for (const pid of new Set([...participants, ...arenaNumbers.keys()])) {
@@ -899,6 +939,12 @@ setInterval(() => Object.values(players).forEach(flushPlayTime), 5 * 60 * 1000);
 //   users/<uid>/selectedClass = { classId, variant }
 
 const CURRENCY_PER_NUMBER = 1;
+
+// Modalità di test (node server.js --all-classes, oppure npm run test-classes):
+// tutte le varianti risultano sbloccate (almeno 1 copia) senza scrivere nel database
+const ALL_CLASSES = process.argv.includes("--all-classes");
+if (ALL_CLASSES) console.log("Modalità test: tutte le classi sono sbloccate");
+const ownedCopies = copies => ALL_CLASSES ? Math.max(1, copies || 0) : (copies || 0);
 const walletLocks = new Map();
 
 function withWallet(uid, fn) {
@@ -938,22 +984,54 @@ async function loadWallet(p) {
         const s = sel.val();
         p.selectedClass = s && findVariant(s.classId, s.variant) ? { classId: s.classId, variant: s.variant } : null;
         sendWallet(p);
+        await loadBonus(p);
         abilities.setClass(p, p.selectedClass ? { ...p.selectedClass, level: await variantLevel(p.authUserId, p.selectedClass) } : null);
     } catch (err) {
         console.error("Errore caricamento Frammenti:", err);
     }
 }
 
-function awardCurrency(p, amount) {
+function awardCurrency(p, amount, note = null) {
     if (!p.authUserId) return;
     p.pendingCurrency += amount;
     if (p.currency != null) p.currency += amount;
-    sendWallet(p, amount);
+    if (p.currency != null) sendJson(p, { type: "wallet", currency: p.currency, gained: amount, note });
+}
+
+// Righe, colonne e 3x3 completati danno Frammenti extra, un sudoku 9x9 intero ancora di più.
+// Come nel client, righe e colonne sono quelle di un qualsiasi sudoku 9x9 (allineato ai
+// blocchi 3x3) che contiene la cella, senza muri; nel sudoku le zone vuote non contano.
+// Ogni unità premia una volta sola (chi la completa): dopo un attacco dei boss non si rifarma.
+const UNIT_CURRENCY = 2, SUDOKU_CURRENCY = 10;
+const rewardedUnits = new Set();
+
+function newlyCompletedUnits(gx, gy) {
+    const zx = Math.floor(gx / 3), zy = Math.floor(gy / 3);
+    const done = { units: [], sudokus: 0 };
+    const complete = cells => cells.every(([x, y]) => isPlayableZone(Math.floor(x / 3), Math.floor(y / 3)) && bossSystem.cellFilled(x, y));
+    const check = (key, kind, cells) => {
+        if (rewardedUnits.has(key) || !complete(cells)) return;
+        rewardedUnits.add(key);
+        if (kind === "sudoku") done.sudokus++;
+        else done.units.push(kind);
+    };
+    const range = (a, n) => Array.from({ length: n }, (_, i) => a + i);
+
+    check(`box|${zx},${zy}`, "3x3", range(0, 9).map(i => [zx * 3 + i % 3, zy * 3 + Math.floor(i / 3)]));
+    for (let s = zx - 2; s <= zx; s++) check(`row|${s * 3},${gy}`, "riga", range(s * 3, 9).map(x => [x, gy]));
+    for (let s = zy - 2; s <= zy; s++) check(`col|${gx},${s * 3}`, "colonna", range(s * 3, 9).map(y => [gx, y]));
+    for (let sy = zy - 2; sy <= zy; sy++) for (let sx = zx - 2; sx <= zx; sx++) {
+        const cells = [];
+        for (let y = sy * 3; y < sy * 3 + 9; y++) for (let x = sx * 3; x < sx * 3 + 9; x++)
+            if (isPlayableZone(Math.floor(x / 3), Math.floor(y / 3))) cells.push([x, y]);
+        check(`win|${sx + 1},${sy + 1}`, "sudoku", cells);
+    }
+    return done;
 }
 
 async function variantLevel(uid, { classId, variant }) {
     const copies = (await db.ref(`users/${uid}/collection/${variantKey(classId, variant)}`).get()).val() || 0;
-    return levelFromCopies(copies).level;
+    return levelFromCopies(ownedCopies(copies)).level;
 }
 
 // Salva i Frammenti in sospeso di tutte le connessioni di un utente (prima di una tirata)
@@ -962,7 +1040,7 @@ const flushUser = uid => Promise.all(Object.values(players).filter(p => p.authUs
 function collectionView(collection) {
     const classes = CLASS_CATALOG.map(cls => {
         const variants = cls.variants.map(v => {
-            const copies = collection[variantKey(cls.id, v.id)] || 0;
+            const copies = ownedCopies(collection[variantKey(cls.id, v.id)]);
             return { ...v, copies, ...levelFromCopies(copies) };
         });
         const copies = variants.reduce((n, v) => n + v.copies, 0);
@@ -1046,7 +1124,7 @@ app.post("/api/classes/select", requireAccount, api(async (req) => {
     const found = findVariant(classId, variant);
     if (!found) throw new ApiError(400, "Classe non valida");
 
-    const copies = (await db.ref(`users/${uid}/collection/${variantKey(classId, variant)}`).get()).val() || 0;
+    const copies = ownedCopies((await db.ref(`users/${uid}/collection/${variantKey(classId, variant)}`).get()).val());
     if (!copies) throw new ApiError(403, "Non hai ancora sbloccato questa variante");
 
     await db.ref(`users/${uid}/selectedClass`).set({ classId, variant });
@@ -1442,6 +1520,10 @@ wss.on("connection", (ws, req) => {
         else if (msg.type === "party_kick") {
             partyKick(p, String(msg.playerId ?? ""));
         }
+        else if (msg.type === "view") {
+            // sudoku 9x9 attivo del client (indizi della Rigenerazione, classe 5)
+            if (Number.isInteger(msg.zx) && Number.isInteger(msg.zy)) p.view = { zx: msg.zx, zy: msg.zy };
+        }
         else if (msg.type === "move") {
             if (p.lobby || !Number.isInteger(msg.x) || !Number.isInteger(msg.y)) return;
             handleMove(p, msg.x, msg.y);
@@ -1489,7 +1571,10 @@ wss.on("connection", (ws, req) => {
             const bit = 1 << (cy * 3 + cx);
             const fresh = !(zone.claimed & bit);
             zone.claimed |= bit;
-            if (fresh) awardCurrency(p, CURRENCY_PER_NUMBER);
+            const { units, sudokus } = newlyCompletedUnits(gx, gy);
+            const gained = (fresh ? CURRENCY_PER_NUMBER : 0) + units.length * UNIT_CURRENCY + sudokus * SUDOKU_CURRENCY;
+            const note = [...units, ...(sudokus ? ["sudoku"] : [])].join(" + ") || null;
+            if (gained) awardCurrency(p, gained, note);
 
             // Le coordinate globali vengono ricavate dal client a partire da zona e cella locale.
             broadcast({ type: "write", zoneKey: zk.key, cx, cy, val, color, by: p.playerId });

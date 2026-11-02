@@ -9,7 +9,8 @@
 //   portals       { list: [{ a, b, color }] }    portali della classe 4 (variante Portale)
 // Dai client arriva anche player_hit { dmg }: serve all'Accumulo (classe 2b).
 //
-// ATK nascosto: cresce con il livello del giocatore insieme agli HP.
+// ATK nascosto: cresce con il livello del giocatore insieme agli HP, più il bonus ATK
+// permanente guadagnato sconfiggendo i boss (p.bonus.atk, vedi server.js).
 // Ogni livello della variante oltre il primo potenzia l'abilità del 5%.
 // L'Amplificatore (9a) nel party potenzia del 50% le abilità degli altri, tranne 3a, 4, 6 e 9.
 
@@ -25,7 +26,7 @@ const SACRIFICE_MULT = 2, SACRIFICE_COOLDOWN_MS = 5000;
 const STORE_SHARE = 0.2, STORE_CAP_MULT = 10, STORE_COOLDOWN_MS = 8000;
 const AURA_REDUCTION = 0.3, MAX_REDUCTION = 0.75;
 const JUMP_RANGE = 45, JUMP_COOLDOWN_MS = 2500;
-const HINT_EVERY_MS = 7000, REGEN_EVERY_MS = 3000, REGEN_SHARE = 0.03, HINT_COLOR = "#38b764";
+const HINT_EVERY_MS = 20000, REGEN_EVERY_MS = 3000, REGEN_SHARE = 0.03, HINT_COLOR = "#38b764";
 const HEAL_SHARE = 0.15, HEAL_COOLDOWN_MS = 5000;
 const SUPPORT_RADIUS = 9;           // "giocatori circostanti" per le classi 5
 const BLINK_RANGE = 8, BLINK_COOLDOWN_MS = 3000;
@@ -61,7 +62,7 @@ const SHAPE_NAMES = { box: "3x3", row: "riga", col: "colonna" };
 export function createAbilitySystem({ players, bossSystem, zoneState, broadcast, sendJson, partyMates, forceMove, occupantAt, nearestFree, broadcastPlayers }) {
     const worldPlayers = () => Object.values(players).filter(p => !p.lobby);
     const keyOf = p => p.cls ? variantKey(p.cls.classId, p.cls.variant) : null;
-    const atkOf = p => 10 + 2 * (Math.max(1, p.level || 1) - 1);
+    const atkOf = p => 10 + 2 * (Math.max(1, p.level || 1) - 1) + (p.bonus?.atk || 0);
     const power = p => 1 + 0.05 * (Math.max(1, p.cls?.level || 1) - 1);
     const amp = p => !AMP_EXCLUDED.has(keyOf(p)) && partyMates(p).some(m => m !== p && keyOf(m) === "9a") ? AMP_MULT : 1;
     const strength = p => power(p) * amp(p);
@@ -190,9 +191,8 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
 
         if (key === "4a") {
             const tx = Number(target?.x), ty = Number(target?.y);
-            if (!Number.isInteger(tx) || !Number.isInteger(ty)) return fail(p, "Nessun 4 da raggiungere: scrivine uno (rotella per scegliere)");
-            const w = writeAt(tx, ty);
-            if (!w || w.val !== 4 || w.by !== p.playerId) return fail(p, "Puoi saltare solo sui tuoi 4");
+            if (!Number.isInteger(tx) || !Number.isInteger(ty)) return fail(p, "Nessun 4 da raggiungere qui vicino (rotella per scegliere)");
+            if (valueAt(tx, ty) !== 4) return fail(p, "Puoi saltare solo su un 4");
             if (!near(p, { x: tx, y: ty }, JUMP_RANGE)) return fail(p, "Quel 4 è troppo lontano");
             if (occupantAt(tx, ty, p)) return fail(p, "Il 4 è occupato da un altro giocatore");
             broadcast({ type: "ability_fx", kind: "jump", by: p.playerId, from: { x: p.x, y: p.y }, to: { x: tx, y: ty } });
@@ -265,15 +265,19 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
 
     /* ---------------- passive ---------------- */
 
-    // Indizio della Rigenerazione (5a): il numero giusto in una cella vuota del sudoku attivo
+    // Indizio della Rigenerazione (5a): il numero giusto in una cella vuota del sudoku attivo:
+    // l'arena del boss in cui si trova, altrimenti il 9x9 attivo del client (p.view, quello
+    // bloccato con R), mai dentro l'arena di un boss in cui non si combatte
     function placeHint(p) {
         const b = bossSystem.bossAt(p.x, p.y);
         const pzx = Math.floor(p.x / 3), pzy = Math.floor(p.y / 3);
-        const [x0, y0] = b ? [b.bx * 3, b.by * 3] : [(pzx - 1) * 3, (pzy - 1) * 3];
+        const v = p.view && Math.abs(p.view.zx - pzx) <= 1 && Math.abs(p.view.zy - pzy) <= 1 ? p.view : { zx: pzx, zy: pzy };
+        const [x0, y0] = b ? [b.bx * 3, b.by * 3] : [(v.zx - 1) * 3, (v.zy - 1) * 3];
         const empty = [];
         for (let y = y0; y < y0 + 9; y++) for (let x = x0; x < x0 + 9; x++) {
             const zx = Math.floor(x / 3), zy = Math.floor(y / 3);
             if (!isPlayableZone(zx, zy) || (revealedMask(zx, zy) & (1 << (mod(y, 3) * 3 + mod(x, 3)))) || writeAt(x, y)) continue;
+            if (bossSystem.bossAt(x, y) !== b) continue;
             empty.push({ x, y });
         }
         if (!empty.length) return;

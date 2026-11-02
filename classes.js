@@ -25,21 +25,21 @@ export const CLASS_CATALOG = [
     {
         id: 3, name: "Tank", role: "Difesa", color: "#3b5dc9",
         variants: [
-            { id: "a", name: "Bastione", desc: "Tutti i giocatori sono immuni finché stanno su un 3, e i boss non possono cancellare i 3." },
-            { id: "b", name: "Aura", desc: "Stando su un 3 generi un'aura 3x3 che riduce del 30% i danni subiti dai giocatori al suo interno." }
+            { id: "a", name: "Bastione", desc: "Nell'arena tutti possono camminare sui 3 e sono immuni finché ci stanno sopra; i boss non possono cancellare i 3." },
+            { id: "b", name: "Aura", desc: "Puoi camminare sui 3: stando su un 3 generi un'aura 3x3 che riduce del 30% i danni subiti dai giocatori al suo interno e impedisce ai boss di cancellarne i numeri." }
         ]
     },
     {
         id: 4, name: "Teleport", role: "Spostamento", color: "#b55ed6",
         variants: [
-            { id: "a", name: "Salto", desc: "Ti teletrasporti su uno dei tuoi 4 (rotella del mouse per scegliere il bersaglio)." },
+            { id: "a", name: "Salto", desc: "Ti teletrasporti su un 4 qualsiasi, iniziale o scritto da chiunque (rotella del mouse per scegliere il bersaglio)." },
             { id: "b", name: "Portale", desc: "Due 4 formano un portale a due vie che possono usare tutti i giocatori." }
         ]
     },
     {
         id: 5, name: "Support", role: "Cura", color: "#38b764",
         variants: [
-            { id: "a", name: "Rigenerazione", desc: "Fa comparire un numero-indizio ogni 7 secondi e rigenera la vita dei giocatori." },
+            { id: "a", name: "Rigenerazione", desc: "Fa comparire un numero-indizio ogni 20 secondi e rigenera la vita dei giocatori." },
             { id: "b", name: "Cura", desc: "Sacrifica i tuoi 5 sul campo per curare i giocatori vicini (15% dei tuoi HP per numero)." }
         ]
     },
