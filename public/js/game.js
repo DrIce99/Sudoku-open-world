@@ -1209,7 +1209,7 @@ document.addEventListener("keydown", e => {
         return;
     }
     // Pannello amici/party aperto: i tasti non muovono il giocatore
-    if (window.Social?.isOpen()) return;
+    if (window.Social?.isOpen() || window.Settings?.isOpen()) return;
     const k = e.key.toLowerCase();
     if (mapMode) {
         if (k === "m" || k === "escape") { closeMap(); return; }

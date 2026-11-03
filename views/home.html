@@ -6,12 +6,15 @@
     <title>Infinitedoku - Home</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="/js/theme.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/home.css">
     <link rel="stylesheet" href="/css/social.css">
     <link rel="stylesheet" href="/css/leaderboard.css">
     <link rel="stylesheet" href="/css/classes.css">
+    <link rel="stylesheet" href="/css/settings.css">
+    <link rel="stylesheet" href="/css/classic.css">
 </head>
 <body class="px-scanlines">
 
@@ -19,6 +22,7 @@
     <canvas id="bg"></canvas>
 
     <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
+    <a href="/version" id="versionBtn" class="px-btn ghost version-badge" title="Patch notes">VERSIONE <span id="versionNum">—</span> <span class="v-badge" data-balance-badge hidden></span></a>
     <button id="searchBtn" class="px-btn yellow" type="button" data-social-open="search" title="Cerca giocatori (C)">CERCA</button>
 
     <main class="home">
@@ -59,11 +63,17 @@
                 <a href="#" class="px-btn menu-item classes-item" data-classes-open>
                     <span class="cursor">▶</span>CLASSI &amp; GACHA
                 </a>
+                <a href="/version#bilanciamenti" class="px-btn ghost menu-item" data-sfx="confirm">
+                    <span class="cursor">▶</span>BILANCIAMENTI <span class="v-badge" data-balance-badge hidden></span>
+                </a>
                 <a href="#" class="px-btn ghost menu-item" data-leaderboard-open>
                     <span class="cursor">▶</span>CLASSIFICA
                 </a>
                 <a href="#" class="px-btn yellow menu-item" data-social-open="friends">
                     <span class="cursor">▶</span>AMICI <span class="badge" data-social-badge hidden></span>
+                </a>
+                <a href="#" class="px-btn ghost menu-item" data-settings-open>
+                    <span class="cursor">▶</span>IMPOSTAZIONI
                 </a>
                 <a href="/logout" class="px-btn red menu-item" data-sfx="select">
                     <span class="cursor">▶</span>LOG OUT
@@ -108,7 +118,7 @@
             </section>
         </div>
 
-        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE · <kbd>C</kbd> CERCA · <kbd>L</kbd> CLASSIFICA · <kbd>G</kbd> GACHA</p>
+        <p class="press-start">PREMI <kbd>INVIO</kbd> PER GIOCARE · <kbd>C</kbd> CERCA · <kbd>L</kbd> CLASSIFICA · <kbd>G</kbd> GACHA · <kbd>B</kbd> BILANCIAMENTI</p>
     </main>
 
     <!-- Transizione a quadrati pixel verso il gioco -->
@@ -118,7 +128,10 @@
     <script src="/js/home.js"></script>
     <script src="/js/social.js"></script>
     <script src="/js/leaderboard.js"></script>
+    <script src="/js/data/changelog.js"></script>
+    <script src="/js/data/balance-history.js"></script>
     <script src="/js/classesPanel.js"></script>
+    <script src="/js/settings.js"></script>
     <script>
         Social.init({ mode: "home" });
     </script>

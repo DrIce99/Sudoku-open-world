@@ -152,6 +152,11 @@ app.get("/", requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, "views", "home.html"));
 });
 
+// Patch notes e storico dei bilanciamenti (pagina pubblica)
+app.get("/version", (req, res) => {
+    res.sendFile(path.join(__dirname, "views", "version.html"));
+});
+
 app.get("/game", requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, "views", "game.html"));
 });

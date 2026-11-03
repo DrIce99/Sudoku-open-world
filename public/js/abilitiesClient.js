@@ -120,8 +120,9 @@
     function scanTargets() {
         if (st.key !== "4a") { targets = []; marker.hidden = true; return; }
         const found = [];
-        for (let zy = curZone.y - 15; zy <= curZone.y + 15; zy++) {
-            for (let zx = curZone.x - 15; zx <= curZone.x + 15; zx++) {
+        const rz = Math.ceil((st.range || 45) / 3);
+        for (let zy = curZone.y - rz; zy <= curZone.y + rz; zy++) {
+            for (let zx = curZone.x - rz; zx <= curZone.x + rz; zx++) {
                 const z = getZone(zx, zy);
                 if (!z || z.empty) continue;
                 for (let li = 0; li < 9; li++) {
@@ -131,7 +132,9 @@
             }
         }
         found.sort((a, b) => Math.hypot(a.x - player.x, a.y - player.y) - Math.hypot(b.x - player.x, b.y - player.y));
-        targets = found.filter(t => Math.max(Math.abs(t.x - player.x), Math.abs(t.y - player.y)) <= 45);
+        // il raggio cresce col livello della variante (lo manda il server)
+        const range = st.range || 45;
+        targets = found.filter(t => Math.max(Math.abs(t.x - player.x), Math.abs(t.y - player.y)) <= range);
         const t = jumpTarget();
         marker.hidden = !t;
         if (t) {

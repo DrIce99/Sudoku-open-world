@@ -22,6 +22,9 @@
     const rand = (a, b) => a + Math.random() * (b - a);
     const pick = arr => arr[Math.floor(Math.random() * arr.length)];
     const gameReady = () => typeof cam !== "undefined" && typeof CELL !== "undefined" && typeof player !== "undefined";
+    // Tema classico (theme.js): stessi effetti, ma morbidi e senza contorni pixel
+    const classic = () => document.documentElement.dataset.theme === "classic";
+    const SMOKE = "rgba(15, 23, 42, .45)";
 
     /* ---------------- DOM ---------------- */
     const canvas = document.createElement("canvas");
@@ -105,7 +108,7 @@
         flashEl.style.background = color;
         flashEl.animate(
             [{ opacity: opacity * (REDUCED ? 0.3 : 1) }, { opacity: 0 }],
-            { duration: dur, easing: "steps(4, end)" }
+            { duration: dur, easing: classic() ? "ease-out" : "steps(4, end)" }
         );
     }
 
@@ -237,6 +240,14 @@
     }
 
     function outlinedRect(x, y, w, h, color, o = 1) {
+        if (classic()) {
+            // pallino sfumato, senza contorno (il canvas viene ingrandito con lo smoothing)
+            g.fillStyle = color === INK ? SMOKE : color;
+            g.beginPath();
+            g.arc(x + w / 2, y + h / 2, Math.max(w, h) / 2 + 0.3, 0, Math.PI * 2);
+            g.fill();
+            return;
+        }
         g.fillStyle = INK;
         g.fillRect(x - o, y - o, w + o * 2, h + o * 2);
         g.fillStyle = color;
@@ -244,6 +255,16 @@
     }
 
     function strokeSquare(x, y, s, color, t) {
+        if (classic()) {
+            g.strokeStyle = color;
+            g.lineWidth = t;
+            g.globalAlpha = 0.85;
+            g.beginPath();
+            g.roundRect(x - s + t / 2, y - s + t / 2, s * 2 - t, s * 2 - t, Math.min(4, s / 3));
+            g.stroke();
+            g.globalAlpha = 1;
+            return;
+        }
         // quadrato vuoto con contorno scuro su entrambi i lati
         g.fillStyle = INK;
         g.fillRect(x - s - 1, y - s - 1, s * 2 + 2, t + 2);
@@ -285,7 +306,15 @@
                     const r = Math.round((o.r0 + (o.r1 - o.r0) * (1 - Math.pow(1 - k, 2))) * cs);
                     const t = Math.max(1, Math.round(o.thick * (1 - k) * 2));
                     if (o.square) strokeSquare(x, y, r, o.color, t);
-                    else {
+                    else if (classic()) {
+                        g.strokeStyle = o.color;
+                        g.lineWidth = t;
+                        g.globalAlpha = 1 - k * 0.6;
+                        g.beginPath();
+                        g.arc(x, y, r, 0, Math.PI * 2);
+                        g.stroke();
+                        g.globalAlpha = 1;
+                    } else {
                         const steps = Math.max(16, r * 4);
                         for (let pass = 0; pass < 2; pass++) {
                             g.fillStyle = pass ? o.color : INK;
@@ -302,12 +331,31 @@
                     const [x, y] = toC(o.cx, o.cy);
                     const inset = Math.floor(k * cs / 2);
                     const s = Math.round(cs) - inset * 2;
-                    if (s > 0) outlinedRect(x + inset, y + inset, s, s, o.color);
+                    if (s > 0 && classic()) {
+                        g.fillStyle = o.color;
+                        g.globalAlpha = 0.55 * (1 - k);
+                        g.beginPath();
+                        g.roundRect(x + inset, y + inset, s, s, 2);
+                        g.fill();
+                        g.globalAlpha = 1;
+                    } else if (s > 0) outlinedRect(x + inset, y + inset, s, s, o.color);
                     break;
                 }
                 case "pillar": {
                     const [x, y] = toC(o.x, o.y);
                     const w = Math.max(1, Math.round(o.width * cs * (1 - k)));
+                    if (classic()) {
+                        // colonna di luce sfumata ai lati
+                        const lg = g.createLinearGradient(x - w / 2, 0, x + w / 2, 0);
+                        lg.addColorStop(0, "rgba(255,255,255,0)");
+                        lg.addColorStop(0.5, o.color);
+                        lg.addColorStop(1, "rgba(255,255,255,0)");
+                        g.fillStyle = lg;
+                        g.globalAlpha = 0.8;
+                        g.fillRect(x - w / 2, 0, w, y);
+                        g.globalAlpha = 1;
+                        break;
+                    }
                     outlinedRect(x - Math.floor(w / 2), 0, w, y, o.color);
                     outlinedRect(x - Math.floor(w / 4), 0, Math.max(1, Math.floor(w / 2)), y, WHITE, 0);
                     break;
@@ -336,6 +384,7 @@
                     for (let n = 0; n < 34; n++) {
                         const a = Math.random() * Math.PI * 2;
                         const r0 = R * rand(0.45, 0.75);
+                        if (classic() && !(n % 3)) continue;
                         g.strokeStyle = n % 3 ? o.color : INK;
                         g.lineWidth = n % 3 ? 1 : 2;
                         g.beginPath();
@@ -502,7 +551,7 @@
                     { transform: "scale(1.55) rotate(6deg)", offset: 0.45 },
                     { transform: "scale(.9) rotate(0)", offset: 0.75 },
                     { transform: "scale(1)" }
-                ], { duration: 340, easing: "steps(8, end)" });
+                ], { duration: 340, easing: classic() ? "ease-out" : "steps(8, end)" });
             }
 
             // nessun "+5 XP" se la cella era già stata premiata (numero riscritto dopo un attacco)

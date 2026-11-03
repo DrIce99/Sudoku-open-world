@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinitedoku - Patch Notes</title>
+    <script src="/js/theme.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/pixel.css">
+    <link rel="stylesheet" href="/css/version.css">
+    <link rel="stylesheet" href="/css/classic.css">
+</head>
+<body class="px-scanlines">
+    <a href="/" id="home-btn" class="px-btn ghost">◀ HOME</a>
+    <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
+
+    <!-- Linguette laterali: una sola visibile alla volta -->
+    <button id="open-balance-btn" class="px-btn yellow slide-btn" type="button">▲▼ BILANCIAMENTI ▶</button>
+    <button id="close-balance-btn" class="px-btn slide-btn" type="button">◀ PATCH NOTES</button>
+
+    <!-- Due viste affiancate: patch notes a sinistra, storico dei bilanciamenti a destra -->
+    <section id="notes-view" class="version-view" aria-label="Patch notes">
+        <div class="view-scroll">
+            <div class="view-inner">
+                <h1 class="v-title px-outline">INFINITE<span>DOKU</span></h1>
+                <h2 id="version-title" class="v-subtitle">PATCH NOTES</h2>
+                <!-- Versioni generate da js/data/changelog.js -->
+                <div id="changelog"></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="balance-view" class="version-view" aria-label="Storico dei bilanciamenti">
+        <div class="view-scroll">
+            <div class="view-inner wide">
+                <h1 class="v-title px-outline">BILANCIAMENTI</h1>
+                <p class="balance-subtitle">Storico di buff e nerf, dal più recente. Le frecce dicono se ogni valore favorisce o sfavorisce il giocatore.</p>
+                <div class="balance-legend" aria-label="Legenda">
+                    <span class="verdict-pill buff">▲ Buff</span>
+                    <span class="verdict-pill nerf">▼ Nerf</span>
+                    <span class="verdict-pill rework">◆ Modifica</span>
+                    <span class="legend-bars"><i class="bar-before"></i> prima <i class="bar-after"></i> dopo</span>
+                </div>
+                <!-- Filtri e schede generati da js/data/balance-history.js -->
+                <div id="balance-filters" class="balance-filters" role="toolbar" aria-label="Filtra per variante"></div>
+                <div id="balance-history"></div>
+            </div>
+        </div>
+    </section>
+
+    <script src="/js/sfx.js"></script>
+    <script src="/js/data/changelog.js"></script>
+    <script src="/js/data/balance-history.js"></script>
+    <script src="/js/version.js"></script>
+</body>
+</html>

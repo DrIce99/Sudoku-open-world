@@ -157,6 +157,7 @@ function drawDigit(g, d, px, py, color) {
 let last = 0, scroll = 0;
 function drawBg(now) {
     requestAnimationFrame(drawBg);
+    if (window.Theme?.isClassic()) return;   // nel tema classico lo sfondo pixel è nascosto
     if (now - last < 1000 / 30) return;   // 30 fps: movimento più "a scatti", da pixel art
     const dt = Math.min(100, now - last);
     last = now;
@@ -270,6 +271,16 @@ function runWipe(closing, done) {
     (function step(now) {
         const p = Math.min(1, (now - t0) / dur);
         wctx.clearRect(0, 0, wipe.width, wipe.height);
+        if (window.Theme?.isClassic()) {
+            // tema classico: dissolvenza invece dei quadrati
+            wctx.globalAlpha = closing ? p : 1 - p;
+            wctx.fillStyle = "#0f172a";
+            wctx.fillRect(0, 0, wipe.width, wipe.height);
+            wctx.globalAlpha = 1;
+            if (p < 1) requestAnimationFrame(step);
+            else done?.();
+            return;
+        }
         for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
             // ogni quadrato cresce in base alla diagonale -> effetto "onda" di pixel
             let k = p * 1.6 - (x + y) / maxD * 0.6;
@@ -301,6 +312,7 @@ function activate(el) {
     if (el.hasAttribute("data-social-open")) return Social.open(el.dataset.socialOpen);
     if (el.hasAttribute("data-leaderboard-open")) return Leaderboard.open();
     if (el.hasAttribute("data-classes-open")) return ClassesPanel.open();
+    if (el.hasAttribute("data-settings-open")) return Settings.open();
     if (leaving) return;
     leaving = true;
     SFX.play(el.dataset.sfx || "confirm");
@@ -311,11 +323,11 @@ function activate(el) {
 items.forEach((el, i) => {
     el.addEventListener("mouseenter", () => { if (sel !== i) select(i); });
     // il pannello amici gestisce il proprio click (Social.init)
-    if (!["data-social-open", "data-leaderboard-open", "data-classes-open"].some(a => el.hasAttribute(a))) el.addEventListener("click", e => { e.preventDefault(); activate(el); });
+    if (!["data-social-open", "data-leaderboard-open", "data-classes-open", "data-settings-open"].some(a => el.hasAttribute(a))) el.addEventListener("click", e => { e.preventDefault(); activate(el); });
 });
 
 document.addEventListener("keydown", e => {
-    if (window.Social?.isOpen() || window.Leaderboard?.isOpen() || window.ClassesPanel?.isOpen() || e.target.tagName === "INPUT") return;
+    if (window.Social?.isOpen() || window.Leaderboard?.isOpen() || window.ClassesPanel?.isOpen() || window.Settings?.isOpen() || e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "arrowdown" || k === "s") { select(sel + 1); e.preventDefault(); }
     else if (k === "arrowup" || k === "w") { select(sel - 1); e.preventDefault(); }
@@ -323,6 +335,7 @@ document.addEventListener("keydown", e => {
     else if (k === "c") { Social.open("search"); e.preventDefault(); }
     else if (k === "l") { Leaderboard.open(); e.preventDefault(); }
     else if (k === "g") { ClassesPanel.open("gacha"); e.preventDefault(); }
+    else if (k === "b") { activate(items.find(el => el.getAttribute("href") === "/version#bilanciamenti")); e.preventDefault(); }
 });
 
 // Tornando indietro dalla cache del browser la tendina resterebbe chiusa
@@ -395,4 +408,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
         console.error("Errore caricamento dati utente:", err);
     }
+});
+
+/* ---------------- VERSIONE (patch notes in /version) ---------------- */
+// data/changelog.js è caricato dopo questo script
+addEventListener("DOMContentLoaded", () => {
+    document.getElementById("versionNum").textContent = window.CURRENT_VERSION || "";
+});
+document.getElementById("versionBtn").addEventListener("click", e => {
+    e.preventDefault();
+    activate(e.currentTarget);
 });

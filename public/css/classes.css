@@ -178,6 +178,26 @@
     color: var(--mist);
 }
 
+/* ultima modifica di bilanciamento (link a /version#bilanciamenti) */
+.cl-vhead .verdict-pill {
+    --v: var(--mist);
+    margin-left: auto;
+    padding: 3px 5px 2px;
+    font-family: var(--font-title);
+    font-size: 7px;
+    color: var(--ink);
+    text-decoration: none;
+    background: var(--v);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.cl-vhead .verdict-pill.buff { --v: #38b764; }
+.cl-vhead .verdict-pill.nerf { --v: #e43b44; color: var(--white); }
+.cl-vhead .verdict-pill.rework { --v: var(--yellow); }
+
+.cl-variants p.cl-perlv { font-size: 14px; color: var(--white); }
+.cl-variants p.cl-perlv b { font-weight: 700; color: var(--yellow); }
+
 .cl-variants .px-btn { align-self: flex-start; }
 .cl-variants .px-btn[disabled] { cursor: default; opacity: .7; }
 

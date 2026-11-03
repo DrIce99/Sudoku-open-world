@@ -1,0 +1,529 @@
+/* ============================================================
+   PATCH NOTES (/version) — linea del tempo delle versioni e, a destra,
+   lo storico dei bilanciamenti. Stile pixel (il classico è in classic.css)
+   ============================================================ */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html, body {
+    height: 100%;
+    overflow: hidden;
+}
+
+body {
+    --buff: #38b764;
+    --nerf: #e43b44;
+    --rework: #ffcd75;
+    background-color: var(--night);
+    background-image:
+        linear-gradient(var(--ink) 4px, transparent 4px),
+        linear-gradient(90deg, var(--ink) 4px, transparent 4px),
+        linear-gradient(rgba(26, 28, 44, .5) 2px, transparent 2px),
+        linear-gradient(90deg, rgba(26, 28, 44, .5) 2px, transparent 2px);
+    background-size: 132px 132px, 132px 132px, 44px 44px, 44px 44px;
+    color: var(--white);
+    font-family: var(--font-body);
+}
+
+#home-btn {
+    position: fixed;
+    z-index: 100;
+    top: 16px;
+    left: 16px;
+    padding: 10px 14px;
+    font-size: 10px;
+}
+
+#sfxBtn { top: 16px; right: 16px; }
+
+/* ===================== DUE VISTE AFFIANCATE ===================== */
+.version-view {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    transition: translate .6s steps(8), opacity .45s steps(5), scale .6s steps(8);
+}
+
+.view-scroll {
+    height: 100%;
+    overflow-y: auto;
+}
+
+.view-inner {
+    width: min(660px, 100%);
+    margin: 0 auto;
+    padding: 76px 24px 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.view-inner.wide { width: min(1040px, 100%); padding-right: 72px; }
+
+#balance-view { translate: 100vw 0; }
+body.show-balance #notes-view { translate: -100vw 0; }
+body.show-balance #balance-view { translate: 0 0; }
+
+body.show-balance #notes-view,
+body:not(.show-balance) #balance-view {
+    opacity: 0;
+    scale: .92;
+}
+
+body.show-balance #open-balance-btn,
+body:not(.show-balance) #close-balance-btn { display: none; }
+
+/* Linguetta sul bordo destro per cambiare vista */
+.slide-btn {
+    position: fixed;
+    z-index: 100;
+    top: 50%;
+    right: 4px;
+    translate: 0 -50%;
+    height: 240px;
+    width: 46px;
+    padding: 10px 4px;
+    writing-mode: vertical-rl;
+    font-size: 10px;
+}
+
+.slide-btn:hover { transform: translateX(-4px); }
+
+/* ===================== TITOLI ===================== */
+.v-title {
+    text-align: center;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: clamp(22px, 4vw, 34px);
+    line-height: 1.3;
+    color: var(--cyan);
+}
+
+.v-title span { display: block; font-size: 1.5em; color: var(--yellow); }
+
+.v-subtitle {
+    text-align: center;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--mist);
+    margin-bottom: 14px;
+}
+
+.v-new {
+    margin-left: 10px;
+    padding: 3px 5px 2px;
+    font-family: var(--font-title);
+    font-size: 7px;
+    font-style: normal;
+    color: var(--ink);
+    background: var(--lime);
+    box-shadow: 0 0 0 2px var(--ink);
+    text-shadow: none;
+    vertical-align: middle;
+    animation: vNew 1s steps(2) infinite;
+}
+
+@keyframes vNew { 50% { filter: brightness(1.3); } }
+
+/* ===================== PATCH NOTES: linea del tempo ===================== */
+#changelog {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    padding-left: 38px;
+}
+
+#changelog::before {
+    content: "";
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    bottom: 10px;
+    width: 4px;
+    background: repeating-linear-gradient(var(--slate) 0 8px, transparent 8px 14px);
+}
+
+.version-entry { position: relative; }
+
+/* "pad" quadrato sulla linea, uno per versione */
+.version-entry::before {
+    content: "";
+    position: absolute;
+    left: -34px;
+    top: 22px;
+    width: 14px;
+    height: 14px;
+    background: var(--deep);
+    box-shadow: 0 0 0 3px var(--ink), inset 0 0 0 3px var(--sky);
+}
+
+.version-entry.current::before {
+    background: var(--yellow);
+    box-shadow: 0 0 0 3px var(--ink), 0 0 0 7px rgba(255, 205, 117, .35);
+    animation: vNew 1s steps(2) infinite;
+}
+
+.version-info { padding: 18px 22px 20px; }
+
+.version-date {
+    font-family: var(--font-title);
+    font-size: 8px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--mist);
+    margin-bottom: 10px;
+}
+
+.version-info h2 {
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+/* versione corrente: titolo con i colori che scorrono a scatti */
+.version-info h2.special {
+    color: transparent;
+    text-shadow: none;
+    background: linear-gradient(90deg, var(--cyan), var(--yellow), var(--lime), var(--cyan));
+    background-size: 300% auto;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: vGradient 3s steps(12) infinite;
+}
+
+@keyframes vGradient { to { background-position: 300% 0; } }
+
+.version-info h3 {
+    display: inline-block;
+    margin: 16px 0 8px;
+    padding: 4px 6px 3px;
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 7px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink);
+    background: var(--sky);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.version-info h3.cat-logic { background: var(--yellow); }
+.version-info h3.cat-rework { background: #b55ed6; color: var(--white); }
+.version-info h3.cat-fix { background: var(--lime); }
+
+.version-changes { list-style: none; }
+
+.version-changes li {
+    position: relative;
+    padding-left: 18px;
+    margin: 6px 0;
+    font-size: 16px;
+    line-height: 1.35;
+}
+
+.version-changes li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: .5em;
+    width: 6px;
+    height: 6px;
+    background: var(--cyan);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.balance-link { margin-top: 16px; }
+
+/* comparsa delle schede quando entrano nello schermo */
+.scroll-reveal {
+    opacity: 0;
+    translate: 0 28px;
+    transition: opacity .5s steps(5), translate .5s steps(5);
+}
+
+.scroll-reveal.in-view { opacity: 1; translate: 0 0; }
+
+/* ===================== BILANCIAMENTI ===================== */
+.balance-subtitle {
+    max-width: 62ch;
+    margin: 0 auto;
+    text-align: center;
+    font-size: 16px;
+    color: var(--mist);
+}
+
+.balance-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 10px 14px;
+}
+
+.verdict-pill {
+    --v: var(--mist);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 7px 3px;
+    font-family: var(--font-title);
+    font-size: 8px;
+    text-transform: uppercase;
+    white-space: nowrap;
+    text-decoration: none;
+    color: var(--ink);
+    background: var(--v);
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.verdict-pill.buff, .balance-card.buff { --v: var(--buff); }
+.verdict-pill.nerf, .balance-card.nerf { --v: var(--nerf); }
+.verdict-pill.rework, .balance-card.rework { --v: var(--rework); }
+.verdict-pill.nerf { color: var(--white); }
+
+.legend-bars {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 15px;
+    color: var(--mist);
+}
+
+.legend-bars i {
+    display: inline-block;
+    width: 26px;
+    height: 8px;
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+.legend-bars .bar-before { background: var(--slate); }
+.legend-bars .bar-after { margin-left: 8px; background: linear-gradient(90deg, var(--buff) 50%, var(--nerf) 50%); }
+
+/* filtri per variante */
+.balance-filters {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 12px;
+}
+
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 0;
+    cursor: pointer;
+    font-family: var(--font-body);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--white);
+    background: var(--deep);
+    box-shadow: 0 0 0 3px var(--ink), 0 4px 0 3px var(--ink);
+    transition: transform .06s steps(2);
+}
+
+.filter-chip:hover { transform: translateY(-2px); }
+
+.filter-chip[aria-pressed="true"] {
+    background: var(--sky);
+    color: var(--ink);
+    transform: translateY(-2px);
+}
+
+.el-dot {
+    flex: none;
+    min-width: 18px;
+    padding: 2px 3px 1px;
+    font-family: var(--font-title);
+    font-size: 8px;
+    font-style: normal;
+    text-align: center;
+    color: var(--ink);
+    background: var(--el, var(--sky));
+    box-shadow: 0 0 0 2px var(--ink);
+}
+
+/* gruppo di una versione */
+.balance-version {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 12px;
+}
+
+.balance-version-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 14px;
+    padding-bottom: 10px;
+    border-bottom: 4px solid var(--ink);
+}
+
+.balance-version-header h2 {
+    font-family: var(--font-title);
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--yellow);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.balance-version-date { font-size: 15px; color: var(--mist); }
+
+.balance-version-summary {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.balance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+/* scheda di una modifica: il colore del verdetto sul bordo sinistro */
+.balance-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 18px 18px 22px;
+}
+
+.balance-card::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    background: var(--v);
+}
+
+.balance-card[hidden],
+.balance-version[hidden] { display: none; }
+
+.balance-card-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.balance-target {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.balance-element {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--mist);
+}
+
+.balance-effect {
+    font-family: var(--font-title);
+    font-size: 13px;
+    color: var(--white);
+    text-shadow: 2px 2px 0 var(--ink);
+}
+
+.balance-card-header .verdict-pill { margin-left: auto; }
+
+.balance-note {
+    font-size: 15px;
+    line-height: 1.35;
+    color: var(--mist);
+}
+
+.balance-stats {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.balance-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.balance-stat-line {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    font-size: 15px;
+}
+
+.balance-stat-label { flex: 1; font-weight: 700; }
+
+.balance-stat-values {
+    white-space: nowrap;
+    color: var(--mist);
+}
+
+.balance-stat-values strong { color: var(--white); }
+
+.balance-delta {
+    min-width: 4.6em;
+    text-align: right;
+    font-family: var(--font-title);
+    font-size: 9px;
+    white-space: nowrap;
+    color: var(--mist);
+}
+
+.balance-stat.good .balance-delta { color: var(--buff); }
+.balance-stat.bad .balance-delta { color: var(--nerf); }
+
+/* barre: "prima" grigia, "dopo" verde/rossa se il valore favorisce/sfavorisce il giocatore */
+.balance-bars {
+    display: grid;
+    gap: 4px;
+}
+
+.balance-bar {
+    height: 8px;
+    background: var(--ink);
+}
+
+.balance-bar > span {
+    display: block;
+    height: 100%;
+    width: 0;
+    transition: width .9s steps(10) var(--delay, 0s);
+}
+
+.balance-bar.before > span { background: var(--slate); }
+.balance-bar.after > span { background: var(--sky); }
+.balance-stat.good .balance-bar.after > span { background: var(--buff); }
+.balance-stat.bad .balance-bar.after > span { background: var(--nerf); }
+
+/* le barre crescono quando la scheda entra nello schermo */
+.balance-card.in-view .balance-bar > span { width: var(--w); }
+
+.balance-empty {
+    text-align: center;
+    color: var(--mist);
+}
+
+@media (max-width: 600px) {
+    .view-inner, .view-inner.wide { padding-left: 12px; padding-right: 58px; }
+    .balance-version-summary { margin-left: 0; }
+}

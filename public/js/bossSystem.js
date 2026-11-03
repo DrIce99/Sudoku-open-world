@@ -271,8 +271,10 @@ class BossManager {
     hitPlayerByAttack(boss, attack, mods = {}) {
         let dmg = Math.max(attack.minDmg, Math.round(maxHp * attack.dmgPct));
 
-        // Aura (classe 3): riduzione se si è nel 3x3 attorno a chi la genera
-        const reduction = Math.max(0, ...(mods.auras || [])
+        // Aura (classe 3): riduzione se si è nel 3x3 attorno a chi la genera;
+        // Bastione dal livello 2: riduzione se si sta accanto a un 3
+        const nextToThree = mods.guard > 0 && [-1, 0, 1].some(dy => [-1, 0, 1].some(dx => (dx || dy) && cellShown(player.x + dx, player.y + dy) === 3));
+        const reduction = Math.max(0, nextToThree ? mods.guard : 0, ...(mods.auras || [])
             .filter(a => Math.abs(a.x - player.x) <= 1 && Math.abs(a.y - player.y) <= 1)
             .map(a => a.reduction));
         dmg *= 1 - reduction;
@@ -287,7 +289,7 @@ class BossManager {
         dmg -= absorbed;
         hp -= dmg;
 
-        const extra = absorbed ? ` (scudo ${absorbed})` : reduction ? ` (aura -${Math.round(reduction * 100)}%)` : "";
+        const extra = absorbed ? ` (scudo ${absorbed})` : reduction ? ` (${nextToThree && reduction === mods.guard ? "bastione" : "aura"} -${Math.round(reduction * 100)}%)` : "";
         toast(`Colpito da ${boss?.name || "un boss"}! -${dmg} HP${extra}`, "bad");
         window.FX?.playerHit(dmg);
 

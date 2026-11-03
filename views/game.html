@@ -6,12 +6,15 @@
     <title>Infinitedoku - World</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <script src="/js/theme.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/css/pixel.css">
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/game.css">
     <link rel="stylesheet" href="/css/fx.css">
     <link rel="stylesheet" href="/css/social.css">
+    <link rel="stylesheet" href="/css/settings.css">
+    <link rel="stylesheet" href="/css/classic.css">
 </head>
 <body>
 
@@ -23,6 +26,7 @@
             <button class="px-btn ghost social-btn" type="button" data-social-open="search" title="Cerca giocatori (C)">CERCA</button>
             <button class="px-btn yellow social-btn" type="button" data-social-open="friends" title="Amici (F)">AMICI <span class="badge" data-social-badge hidden></span></button>
         </div>
+        <button class="px-btn ghost set-gear" type="button" data-settings-open title="Impostazioni">⚙</button>
         <button id="sfxBtn" class="px-btn ghost sfx-toggle" type="button">SFX</button>
     </header>
 
@@ -117,6 +121,7 @@
     <script src="/js/bossSystem.js"></script>
     <script src="/js/abilitiesClient.js"></script>
     <script src="/js/social.js"></script>
+    <script src="/js/settings.js"></script>
     <script>
         Social.init({ mode: "game", getWs: () => ws, getMe: () => myPlayerId });
     </script>

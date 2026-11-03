@@ -11,8 +11,11 @@
 //
 // ATK nascosto: cresce con il livello del giocatore insieme agli HP, più il bonus ATK
 // permanente guadagnato sconfiggendo i boss (p.bonus.atk, vedi server.js).
-// Ogni livello della variante oltre il primo potenzia l'abilità del 5%.
-// L'Amplificatore (9a) nel party potenzia del 50% le abilità degli altri, tranne 3a, 4, 6 e 9.
+// Ogni livello della variante oltre il primo potenzia l'abilità del 5% (danni, cure, scudi,
+// riduzioni, durata del Congelamento). Le abilità senza numeri da potenziare crescono in
+// altro modo: più portali (4b), più raggio e meno ricarica (4a, 6b), protezione accanto ai 3
+// (3a), indizi più frequenti (5a), amplificazione più forte (9a). Vedi anche classes.js.
+// L'Amplificatore (9a) nel party potenzia le abilità degli altri, tranne 3a, 4, 6 e 9.
 
 import { variantKey } from "./classes.js";
 import { solutionAtCell, isPlayableZone, revealedMask, mod } from "./worldgen.js";
@@ -25,16 +28,17 @@ const FURY_COOLDOWN_MS = 10000;     // dopo la disattivazione
 const SACRIFICE_MULT = 2, SACRIFICE_COOLDOWN_MS = 5000;
 const STORE_SHARE = 0.2, STORE_CAP_MULT = 10, STORE_COOLDOWN_MS = 8000;
 const AURA_REDUCTION = 0.3, MAX_REDUCTION = 0.75;
-const JUMP_RANGE = 45, JUMP_COOLDOWN_MS = 2500;
+const JUMP_RANGE = 45, JUMP_RANGE_PER_LEVEL = 5, JUMP_COOLDOWN_MS = 2500;
+const BASTION_GUARD_PER_LEVEL = 0.05; // Bastione: riduzione accanto a un 3, dal livello 2
 const HINT_EVERY_MS = 20000, REGEN_EVERY_MS = 3000, REGEN_SHARE = 0.03, HINT_COLOR = "#38b764";
 const HEAL_SHARE = 0.15, HEAL_COOLDOWN_MS = 5000;
 const SUPPORT_RADIUS = 9;           // "giocatori circostanti" per le classi 5
-const BLINK_RANGE = 8, BLINK_COOLDOWN_MS = 3000;
+const BLINK_RANGE = 8, BLINK_COOLDOWN_MS = 3000;   // +1 cella di raggio ogni 2 livelli
 const PARRY_WINDOW_MS = 400, PARRY_MISS_COOLDOWN_MS = 10000;
 const COUNTER_MULT = 3.5, COUNTER_MS = 15000;
 const STUN_MS = 5000, STUN_COOLDOWN_MS = 15000;
 const SHIELD_SHARE = 0.1, SHIELD_MS = 30000;
-const AMP_MULT = 1.5;
+const AMP_MULT = 1.5, AMP_PER_LEVEL = 0.05;
 const AMP_EXCLUDED = new Set(["3a", "4a", "4b", "6a", "6b", "9a", "9b"]);
 
 export const ABILITY_DEFS = {
@@ -63,8 +67,18 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
     const worldPlayers = () => Object.values(players).filter(p => !p.lobby);
     const keyOf = p => p.cls ? variantKey(p.cls.classId, p.cls.variant) : null;
     const atkOf = p => 10 + 2 * (Math.max(1, p.level || 1) - 1) + (p.bonus?.atk || 0);
-    const power = p => 1 + 0.05 * (Math.max(1, p.cls?.level || 1) - 1);
-    const amp = p => !AMP_EXCLUDED.has(keyOf(p)) && partyMates(p).some(m => m !== p && keyOf(m) === "9a") ? AMP_MULT : 1;
+    const lvl = p => Math.max(1, p.cls?.level || 1);
+    const power = p => 1 + 0.05 * (lvl(p) - 1);
+    // il compagno Amplificatore di livello più alto decide il bonus
+    const amp = p => {
+        if (AMP_EXCLUDED.has(keyOf(p))) return 1;
+        const amps = partyMates(p).filter(m => m !== p && keyOf(m) === "9a");
+        return amps.length ? Math.max(...amps.map(m => AMP_MULT + AMP_PER_LEVEL * (lvl(m) - 1))) : 1;
+    };
+    const jumpRange = p => JUMP_RANGE + JUMP_RANGE_PER_LEVEL * (lvl(p) - 1);
+    const blinkRange = p => BLINK_RANGE + Math.floor((lvl(p) - 1) / 2);
+    const portalCount = p => lvl(p);   // un portale aperto in più a ogni livello
+    const bastionGuard = p => BASTION_GUARD_PER_LEVEL * (lvl(p) - 1);
     const strength = p => power(p) * amp(p);
     const ab = p => p.ab ??= { cooldownUntil: 0, active: false, activeSince: 0, stored: 0, furyTimer: 0, hintTimer: 0, regenTimer: 0 };
     const near = (p, q, r = SUPPORT_RADIUS) => Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) <= r;
@@ -109,6 +123,7 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
             cap: key === "2b" ? Math.round(atkOf(p) * STORE_CAP_MULT * strength(p)) : null,
             locked: key === "1a" && (p.level || 1) < FURY_UNLOCK_LEVEL ? FURY_UNLOCK_LEVEL : null,
             shape: key === "7b" && p.counter && p.counter.until > now ? SHAPE_NAMES[p.counter.shape] : null,
+            range: key === "4a" ? jumpRange(p) : key === "6b" ? blinkRange(p) : null,
             message, error
         };
     }
@@ -193,12 +208,12 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
             const tx = Number(target?.x), ty = Number(target?.y);
             if (!Number.isInteger(tx) || !Number.isInteger(ty)) return fail(p, "Nessun 4 da raggiungere qui vicino (rotella per scegliere)");
             if (valueAt(tx, ty) !== 4) return fail(p, "Puoi saltare solo su un 4");
-            if (!near(p, { x: tx, y: ty }, JUMP_RANGE)) return fail(p, "Quel 4 è troppo lontano");
+            if (!near(p, { x: tx, y: ty }, jumpRange(p))) return fail(p, "Quel 4 è troppo lontano");
             if (occupantAt(tx, ty, p)) return fail(p, "Il 4 è occupato da un altro giocatore");
             broadcast({ type: "ability_fx", kind: "jump", by: p.playerId, from: { x: p.x, y: p.y }, to: { x: tx, y: ty } });
             forceMove(p, tx, ty, "teleport");
             broadcastPlayers();
-            a.cooldownUntil = now + JUMP_COOLDOWN_MS;
+            a.cooldownUntil = now + JUMP_COOLDOWN_MS / power(p);
             return sendState(p);
         }
 
@@ -223,14 +238,14 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
             const tx = Number(target?.x), ty = Number(target?.y);
             if (!Number.isInteger(tx) || !Number.isInteger(ty)) return fail(p, "Clicca una cella del sudoku per il Blink");
             // dentro il sudoku attivo: l'arena del boss, oppure le celle vicine al giocatore
-            const inside = b ? bossSystem.containsCell(b, tx, ty) : near(p, { x: tx, y: ty }, BLINK_RANGE);
+            const inside = b ? bossSystem.containsCell(b, tx, ty) : near(p, { x: tx, y: ty }, blinkRange(p));
             if (!inside) return fail(p, "Puoi fare Blink solo dentro il sudoku attivo");
             if (!isPlayableZone(Math.floor(tx / 3), Math.floor(ty / 3))) return fail(p, "Lì c'è un muro");
             if (occupantAt(tx, ty, p)) return fail(p, "La cella è occupata");
             broadcast({ type: "ability_fx", kind: "blink", by: p.playerId, from: { x: p.x, y: p.y }, to: { x: tx, y: ty } });
             forceMove(p, tx, ty, "blink");
             broadcastPlayers();
-            a.cooldownUntil = now + BLINK_COOLDOWN_MS;
+            a.cooldownUntil = now + BLINK_COOLDOWN_MS / power(p);
             return sendState(p);
         }
 
@@ -251,7 +266,7 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
 
         if (key === "8a") {
             if (!b) return fail(p, "Usala nell'arena di un boss");
-            bossSystem.stun(b, STUN_MS * amp(p), p);
+            bossSystem.stun(b, STUN_MS * power(p) * amp(p), p);
             a.cooldownUntil = now + STUN_COOLDOWN_MS;
             return sendState(p, "Boss congelato!");
         }
@@ -310,7 +325,7 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
             if (key === "5a") {
                 a.hintTimer += dt;
                 a.regenTimer += dt;
-                if (a.hintTimer >= HINT_EVERY_MS / amp(p)) {
+                if (a.hintTimer >= HINT_EVERY_MS / strength(p)) {
                     a.hintTimer = 0;
                     placeHint(p);
                 }
@@ -340,14 +355,15 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
     }, 100);
 
     /* ---------------- portali (4b) ---------------- */
-    // Gli ultimi due 4 scritti da un giocatore con la variante Portale, finché esistono entrambi
+    // Le coppie di 4 scritte da un giocatore con la variante Portale, finché esistono entrambi
     function activePortals() {
         const list = [];
+        const alive = c => { const w = writeAt(c.x, c.y); return w && w.val === 4; };
         for (const p of worldPlayers()) {
-            if (keyOf(p) !== "4b" || p.anchors?.length !== 2) continue;
-            const [a, b] = p.anchors;
-            const ok = [a, b].every(c => { const w = writeAt(c.x, c.y); return w && w.val === 4 && w.by === p.playerId; });
-            if (ok) list.push({ a, b, color: p.color, owner: p.playerId });
+            if (keyOf(p) !== "4b") continue;
+            for (const [a, b] of p.portalPairs || []) {
+                if (alive(a) && alive(b) && [a, b].every(c => writeAt(c.x, c.y).by === p.playerId)) list.push({ a, b, color: p.color, owner: p.playerId });
+            }
         }
         return list;
     }
@@ -401,12 +417,19 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
             for (const q of targets) sendJson(q, { type: "shield", amount, duration: SHIELD_MS, from: p.name });
         }
 
-        // Portale (4b): ogni 4 diventa un'ancora; le ultime due formano il portale
+        // Portale (4b): ogni 4 diventa un'ancora e due ancore di fila aprono un portale;
+        // i portali aperti insieme crescono col livello (oltre il limite sparisce il più vecchio)
         if (key === "4b" && val === 4) {
-            p.anchors = [...(p.anchors || []), { x, y }].slice(-2);
+            const max = portalCount(p);
+            if (!p.anchor) {
+                p.anchor = { x, y };
+                sendState(p, "Ancora piazzata: scrivi un altro 4 per aprire il portale");
+            } else {
+                p.portalPairs = [...(p.portalPairs || []), [p.anchor, { x, y }]].slice(-max);
+                p.anchor = null;
+                sendState(p, max > 1 ? `Portale aperto (${p.portalPairs.length}/${max})` : "Portale aperto tra i tuoi ultimi due 4");
+            }
             broadcastPortalsIfChanged();
-            if (p.anchors.length === 2) sendState(p, "Portale aperto tra i tuoi ultimi due 4");
-            else sendState(p, "Ancora piazzata: scrivi un altro 4 per aprire il portale");
         }
 
         // Aura di risposta (7b): un 7 nell'arena crea l'aura (Spazio ne cambia la forma)
@@ -445,13 +468,16 @@ export function createAbilitySystem({ players, bossSystem, zoneState, broadcast,
     // Protezioni attive nell'arena al momento di un colpo (vedi bossServer.js)
     function strikeMods(b) {
         const inside = worldPlayers().filter(q => bossSystem.containsCell(b, q.x, q.y));
-        const bastion = inside.some(q => keyOf(q) === "3a");
+        const bastions = inside.filter(q => keyOf(q) === "3a");
+        const bastion = bastions.length > 0;
+        // dal livello 2 il Bastione protegge in parte anche chi sta accanto a un 3
+        const guard = Math.min(MAX_REDUCTION, Math.max(0, ...bastions.map(bastionGuard)));
         const auras = inside
             .filter(q => keyOf(q) === "3b" && valueAt(q.x, q.y) === 3)
             .map(q => ({ x: q.x, y: q.y, reduction: Math.min(MAX_REDUCTION, AURA_REDUCTION * strength(q)) }));
         const rage = inside.filter(q => keyOf(q) === "1a" && q.ab?.active).map(q => q.playerId);
         const counters = countersIn(b).map(q => ({ ...counterRect(b, q.counter), color: q.color }));
-        return { bastion, auras, rage, counters, protectValues: bastion ? [3] : [] };
+        return { bastion, guard, auras, rage, counters, protectValues: bastion ? [3] : [] };
     }
 
     return { use, setClass, sendState, onPlayerHit, onWrite, onMoved, onStrike, strikeMods, portalsSnapshot };

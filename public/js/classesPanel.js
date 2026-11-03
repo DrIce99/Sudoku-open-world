@@ -103,8 +103,11 @@
                 return h("li", { class: v.level ? "" : "locked" },
                     h("div", { class: "cl-vhead" },
                         h("b", { text: v.level ? v.name : "Variante bloccata" }),
+                        // ultima modifica di bilanciamento (storico in data/balance-history.js)
+                        (() => { const c = window.Balance?.latestFor(`${cls.id}${v.id}`); return c ? Balance.chip(c) : null; })(),
                         h("span", { class: "cl-vlv", text: v.level ? `LV ${v.level} · ${v.copies} copie` : "Da trovare nel gacha" })),
                     h("p", { text: v.desc }),
+                    v.perLevel ? h("p", { class: "cl-perlv" }, h("b", { text: "Per livello: " }), v.perLevel) : null,
                     v.level ? levelBar(v) : null,
                     v.level ? h("button", {
                         class: "px-btn small " + (inUse ? "ghost" : "green"), type: "button",

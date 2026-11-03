@@ -424,6 +424,30 @@ body {
     50% { opacity: 0; }
 }
 
+/* versione corrente (patch notes) in basso a sinistra */
+.version-badge {
+    position: fixed;
+    z-index: 1200;
+    left: 16px;
+    bottom: 16px;
+    padding: 9px 12px;
+    font-size: 9px;
+}
+
+.v-badge {
+    padding: 3px 5px 2px;
+    font-family: var(--font-title);
+    font-size: 7px;
+    color: var(--ink);
+    background: var(--lime);
+    box-shadow: 0 0 0 2px var(--ink);
+    text-shadow: none;
+    animation: blink 1s steps(2) infinite;
+}
+
+.menu-item .v-badge { margin-left: 8px; }
+.v-badge[hidden] { display: none; }
+
 @media (max-width: 760px) {
     .home { padding-top: 72px; }
 
