@@ -25,6 +25,8 @@
     // Tema classico (theme.js): stessi effetti, ma morbidi e senza contorni pixel
     const classic = () => document.documentElement.dataset.theme === "classic";
     const SMOKE = "rgba(15, 23, 42, .45)";
+    // movimento fluido (Impostazioni) o tema classico: niente animazioni a scatti
+    const smooth = () => window.Theme?.isSmooth() ?? classic();
 
     /* ---------------- DOM ---------------- */
     const canvas = document.createElement("canvas");
@@ -108,7 +110,7 @@
         flashEl.style.background = color;
         flashEl.animate(
             [{ opacity: opacity * (REDUCED ? 0.3 : 1) }, { opacity: 0 }],
-            { duration: dur, easing: classic() ? "ease-out" : "steps(4, end)" }
+            { duration: dur, easing: smooth() ? "ease-out" : "steps(4, end)" }
         );
     }
 
@@ -551,7 +553,7 @@
                     { transform: "scale(1.55) rotate(6deg)", offset: 0.45 },
                     { transform: "scale(.9) rotate(0)", offset: 0.75 },
                     { transform: "scale(1)" }
-                ], { duration: 340, easing: classic() ? "ease-out" : "steps(8, end)" });
+                ], { duration: 340, easing: smooth() ? "ease-out" : "steps(8, end)" });
             }
 
             // nessun "+5 XP" se la cella era già stata premiata (numero riscritto dopo un attacco)

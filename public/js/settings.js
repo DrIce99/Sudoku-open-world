@@ -1,11 +1,17 @@
 /* ============================================================
-   IMPOSTAZIONI (home e gioco) — per ora il tema: pixel o classico
+   IMPOSTAZIONI (home e gioco) — tema (pixel o classico) e movimento
+   (retro a scatti o fluido, solo nel tema pixel)
    Riusa .social-box / .social-close di social.css; il tema è in theme.js.
    ============================================================ */
 (function () {
     const THEMES = [
         { id: "pixel", name: "PIXEL", desc: "Pixel art cartoon con contorni spessi ed effetti a scatti." },
         { id: "classic", name: "CLASSICO", desc: "Lo stile di prima: morbido e pulito, con effetti sfumati." }
+    ];
+
+    const MOTIONS = [
+        { id: "retro", name: "RETRO", desc: "Animazioni a scatti e sfondo a 30 fps, come un vecchio gioco." },
+        { id: "smooth", name: "FLUIDO", desc: "Stesso stile pixel, ma animazioni morbide e senza scatti." }
     ];
 
     let open = false;
@@ -34,6 +40,14 @@
         onclick: () => { window.Theme?.set(t.id); sfx("confirm"); paint(); }
     }, preview(t.id), h("span", { class: "set-text" }, h("b", { text: t.name }), h("small", { text: t.desc }))));
 
+    // Movimento: mini-anteprima di un quadrato che si sposta, a scatti o fluido
+    const motionBtns = MOTIONS.map(m => h("button", {
+        class: "set-theme set-motion", type: "button", "data-motion-id": m.id,
+        onclick: () => { window.Theme?.setMotion(m.id); sfx("confirm"); paint(); }
+    }, h("span", { class: "set-motion-preview", "data-preview": m.id }, h("i")),
+        h("span", { class: "set-text" }, h("b", { text: m.name }), h("small", { text: m.desc }))));
+    const motionHint = h("p", { class: "set-hint" });
+
     const panel = h("div", { id: "setPanel", class: "hidden", onclick: e => { if (e.target === panel) close(); } },
         h("div", { class: "social-box px-panel set-box" },
             h("header", {},
@@ -42,13 +56,29 @@
             h("section", { class: "set-section" },
                 h("h3", { text: "TEMA" }),
                 h("div", { class: "set-themes" }, themeBtns),
-                h("p", { class: "set-hint", text: "La scelta vale per questo browser e si applica subito." }))));
+                h("p", { class: "set-hint", text: "La scelta vale per questo browser e si applica subito." })),
+            h("section", { class: "set-section" },
+                h("h3", { text: "MOVIMENTO" }),
+                h("div", { class: "set-themes" }, motionBtns),
+                motionHint)));
     document.body.append(panel);
 
     function paint() {
         const cur = window.Theme?.get() || "pixel";
         themeBtns.forEach(b => b.classList.toggle("is-selected", b.dataset.themeId === cur));
+        const motion = window.Theme?.motion() || "retro";
+        const classic = cur === "classic";
+        motionBtns.forEach(b => {
+            b.classList.toggle("is-selected", b.dataset.motionId === motion);
+            b.disabled = classic;
+        });
+        motionHint.textContent = classic
+            ? "Il tema Classico è sempre fluido: questa scelta vale per il tema Pixel."
+            : "Vale per animazioni, effetti speciali e sfondo della home.";
     }
+
+    // il tema può cambiare anche da fuori (es. un'altra scheda del pannello): ridisegna le scelte
+    addEventListener("themechange", paint);
 
     function close() {
         if (!open) return;

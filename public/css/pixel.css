@@ -154,6 +154,30 @@ kbd {
     font-size: 9px;
 }
 
+/* ============================================================
+   MOVIMENTO FLUIDO (Impostazioni → Movimento): stesso stile pixel,
+   ma animazioni e transizioni senza gli scatti "retro".
+   Le barre a tempo e gli scorrimenti continui restano lineari.
+   ============================================================ */
+:root[data-motion="smooth"] *,
+:root[data-motion="smooth"] *::before,
+:root[data-motion="smooth"] *::after {
+    animation-timing-function: ease-in-out !important;
+    transition-timing-function: ease !important;
+}
+
+:root[data-motion="smooth"] .boss-attack-cell,
+:root[data-motion="smooth"] .boss-attack-cell::after,
+:root[data-motion="smooth"] .portal,
+:root[data-motion="smooth"] .fx-warning .tape,
+:root[data-motion="smooth"] .invite-time i,
+:root[data-motion="smooth"] .version-info h2.special,
+:root[data-motion="smooth"] body:has(.login-card) {
+    animation-timing-function: linear !important;
+}
+
+:root[data-motion="smooth"] #fxCombo .ctime i { transition-timing-function: linear !important; }
+
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         animation-duration: .001ms !important;

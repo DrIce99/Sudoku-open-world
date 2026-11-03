@@ -131,9 +131,12 @@ const isVoid = (x, y) => cellHash(Math.floor(x / 3), Math.floor(y / 3), 7) < 0.1
 
 let W = 0, H = 0;
 function resizeBg() {
-    W = Math.ceil(innerWidth / SCALE);
-    H = Math.ceil(innerHeight / SCALE);
+    // un pixel in più per lato: col movimento fluido il canvas scorre di frazioni di pixel
+    W = Math.ceil(innerWidth / SCALE) + 1;
+    H = Math.ceil(innerHeight / SCALE) + 1;
     bg.width = W; bg.height = H;
+    bg.style.width = W * SCALE + "px";
+    bg.style.height = H * SCALE + "px";
 }
 resizeBg();
 addEventListener("resize", resizeBg);
@@ -158,12 +161,16 @@ let last = 0, scroll = 0;
 function drawBg(now) {
     requestAnimationFrame(drawBg);
     if (window.Theme?.isClassic()) return;   // nel tema classico lo sfondo pixel è nascosto
-    if (now - last < 1000 / 30) return;   // 30 fps: movimento più "a scatti", da pixel art
+    // 30 fps: movimento più "a scatti", da pixel art (salvo movimento fluido nelle impostazioni)
+    if (!window.Theme?.isSmooth() && now - last < 1000 / 30) return;
     const dt = Math.min(100, now - last);
     last = now;
     scroll += dt * 0.006;
 
     const ox = Math.floor(scroll), oy = Math.floor(scroll * 0.5);
+    // movimento fluido: la parte frazionaria dello scorrimento la fa il CSS, senza scatti di 4px
+    bg.style.transform = window.Theme?.isSmooth()
+        ? `translate(${-(scroll - ox) * SCALE}px, ${-(scroll * 0.5 - oy) * SCALE}px)` : "";
     bgx.fillStyle = PAL.night;
     bgx.fillRect(0, 0, W, H);
 

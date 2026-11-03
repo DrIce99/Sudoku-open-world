@@ -131,6 +131,34 @@
 
 .set-preview[data-preview="classic"] i:nth-child(5) { color: #1d4ed8; font-weight: 700; }
 
+/* ----- anteprime del movimento: un quadrato che va avanti e indietro ----- */
+.set-motion[disabled] { opacity: .45; cursor: default; transform: none; }
+
+.set-motion-preview {
+    position: relative;
+    width: 96px;
+    height: 26px;
+    background: #f4f4f4;
+    box-shadow: 0 0 0 3px #1a1c2c;
+}
+
+.set-motion-preview i {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 16px;
+    height: 16px;
+    background: #41a6f6;
+    box-shadow: 0 0 0 2px #1a1c2c;
+    animation: setSlide 1.6s infinite alternate;
+}
+
+/* !important: le anteprime mostrano sempre la propria versione, qualunque sia il movimento scelto */
+.set-motion-preview[data-preview="retro"] i { animation-timing-function: steps(6) !important; }
+.set-motion-preview[data-preview="smooth"] i { animation-timing-function: ease-in-out !important; }
+
+@keyframes setSlide { to { left: 75px; } }
+
 .set-gear {
     width: 40px;
     padding: 8px 0;

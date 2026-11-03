@@ -942,7 +942,7 @@ function showWin() {
     const delay = window.FX ? 1300 : 0;
     setTimeout(() => {
         w.classList.remove("hide");
-        if (AN) AN({ targets: "#win .card", scale: [.6, 1], opacity: [0, 1], duration: 450, easing: "steps(6)" });
+        if (AN) AN({ targets: "#win .card", scale: [.6, 1], opacity: [0, 1], duration: 450, easing: window.Theme?.isSmooth() ? "easeOutBack" : "steps(6)" });
     }, delay);
     setTimeout(() => w.classList.add("hide"), 3200 + delay);
 }

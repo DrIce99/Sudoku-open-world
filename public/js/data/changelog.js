@@ -19,7 +19,8 @@ window.CHANGELOG = [
         changes: {
             feature: [
                 "Pagina delle patch notes con lo storico dei bilanciamenti: valori prima/dopo, barre a confronto e filtri per variante",
-                "Bottone della versione in home, con l'avviso NEW quando escono patch nuove"
+                "Bottone della versione in home, con l'avviso NEW quando escono patch nuove",
+                "Impostazioni: movimento Retro (a scatti, 30 fps) o Fluido per il tema Pixel"
             ],
             logic: [
                 "Portale (4b): un portale aperto in più a ogni livello della variante"
