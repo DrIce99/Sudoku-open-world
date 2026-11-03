@@ -863,9 +863,8 @@ function broadcast(data) {
 }
 
 // worldState.zones[zoneKey] = { writes: { "lx,ly": {val,color} }, disc: bool }
-// In memoria per semplicità: si azzera se il processo riparte. Se vuoi la
-// persistenza tra riavvii, questo è il punto dove salvare/leggere dal Realtime Database
-// (es. un nodo "worldState/zones/<zoneKey>" per zona).
+// In memoria, ma salvato nel Realtime Database e ricaricato all'avvio (vedi
+// "PERSISTENZA DEL MONDO" in fondo al file).
 const worldState = { zones: {} };
 
 // claimed: maschera a 9 bit delle celle che hanno già dato la ricompensa (XP e Frammenti).
@@ -932,7 +931,7 @@ function flushPlayTime(p) {
         update[`users/${p.authUserId}/classTime/${key}`] = increment(secs);
         update[`classUsage/${key}/timeSec`] = increment(secs);
     }
-    db.ref().update(update).catch(err => console.error("Errore tempo di gioco:", err));
+    return db.ref().update(update).catch(err => console.error("Errore tempo di gioco:", err));
 }
 
 setInterval(() => Object.values(players).forEach(flushPlayTime), 5 * 60 * 1000);
@@ -1677,8 +1676,93 @@ async function backfillGeneralLeaderboard() {
 }
 backfillGeneralLeaderboard();
 
+// ==================== PERSISTENZA DEL MONDO ====================
+// I numeri scritti, le celle già premiate (claimed) e le unità già pagate con i Frammenti
+// vivono in memoria, ma vengono salvati nel Realtime Database:
+//   world/zones/<zoneKey> = { w: writes, c: claimed }     (zona senza nulla: cancellata)
+//   world/units/<chiave>  = true                          (es. "row|-6,3")
+// Si caricano all'avvio, prima di accettare giocatori; ogni WORLD_SAVE_MS si salvano solo
+// le zone cambiate (qualunque sia la causa: scritture, attacchi dei boss, abilità), e tutto
+// viene salvato anche quando il server si spegne (deploy, riavvio, Render che lo addormenta).
+const WORLD_SAVE_MS = 3000;
+const savedZones = new Map();   // zoneKey -> firma JSON dell'ultimo record salvato
+const savedUnits = new Set();
+
+function zoneRecord(z) {
+    const hasWrites = Object.keys(z.writes).length > 0;
+    return hasWrites || z.claimed ? { w: hasWrites ? z.writes : null, c: z.claimed || 0 } : null;
+}
+
+async function loadWorld() {
+    try {
+        const [zones, units] = await Promise.all([db.ref("world/zones").get(), db.ref("world/units").get()]);
+        for (const [key, rec] of Object.entries(zones.val() || {})) {
+            const z = zoneState(key);
+            z.writes = rec.w || {};
+            z.claimed = rec.c || 0;
+            savedZones.set(key, JSON.stringify(zoneRecord(z)));
+        }
+        for (const key of Object.keys(units.val() || {})) {
+            rewardedUnits.add(key);
+            savedUnits.add(key);
+        }
+        console.log(`Mondo caricato: ${savedZones.size} zone con numeri, ${savedUnits.size} unità completate`);
+    } catch (err) {
+        console.error("Errore caricamento del mondo:", err);
+    }
+}
+
+let worldSaving = null;
+function saveWorld() {
+    if (worldSaving) return worldSaving;
+    const updates = {}, sigs = new Map(), units = [];
+    for (const [key, z] of Object.entries(worldState.zones)) {
+        const rec = zoneRecord(z);
+        const sig = JSON.stringify(rec);
+        if ((savedZones.get(key) ?? "null") === sig) continue;
+        updates[`world/zones/${key}`] = rec;   // null cancella la zona
+        sigs.set(key, sig);
+    }
+    for (const key of rewardedUnits) {
+        if (savedUnits.has(key)) continue;
+        updates[`world/units/${key}`] = true;
+        units.push(key);
+    }
+    if (!Object.keys(updates).length) return Promise.resolve();
+
+    // le firme si aggiornano solo a salvataggio riuscito: se fallisce, si riprova al giro dopo
+    worldSaving = db.ref().update(updates)
+        .then(() => {
+            sigs.forEach((sig, key) => savedZones.set(key, sig));
+            units.forEach(key => savedUnits.add(key));
+        })
+        .catch(err => console.error("Errore salvataggio del mondo:", err))
+        .finally(() => { worldSaving = null; });
+    return worldSaving;
+}
+
+setInterval(saveWorld, WORLD_SAVE_MS);
+
+// Spegnimento (deploy, riavvio, Ctrl+C): salva mondo, Frammenti e tempo di gioco prima di uscire
+let shuttingDown = false;
+async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal}: salvataggio prima dello spegnimento...`);
+    const pending = Object.values(players).flatMap(p => [flushPlayTime(p), flushCurrency(p)]);
+    await Promise.race([
+        Promise.allSettled([worldSaving, ...pending]).then(() => saveWorld()),
+        new Promise(r => setTimeout(r, 8000))
+    ]);
+    process.exit(0);
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 // La piattaforma di hosting (Render, Railway, Fly.io...) indica la porta in PORT
 const PORT = Number(process.env.PORT) || 3000;
-server.listen(PORT, () => {
-    console.log(`Server attivo su http://localhost:${PORT}`);
+loadWorld().then(() => {
+    server.listen(PORT, () => {
+        console.log(`Server attivo su http://localhost:${PORT}`);
+    });
 });

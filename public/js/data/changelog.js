@@ -24,6 +24,9 @@ window.CHANGELOG = [
             ],
             logic: [
                 "Portale (4b): un portale aperto in più a ogni livello della variante"
+            ],
+            fix: [
+                "I numeri scritti nel mondo sparivano quando il server si riavviava: ora sono salvati nel database"
             ]
         }
     },
