@@ -6,7 +6,7 @@ import session from "express-session";
 import { WebSocketServer } from "ws";
 import { randomUUID } from "crypto";
 import { auth, db, getPlayerData, updatePlayerData, serverTimestamp, increment } from "./firebase.js";
-import { WORLD_SEED, isPlayableZone, solutionAtCell, revealedMask } from "./worldgen.js";
+import { WORLD_SEED, WORLD_VERSION, isPlayableZone, solutionAtCell, revealedMask } from "./worldgen.js";
 import { createBossSystem } from "./bossServer.js";
 import { createAbilitySystem } from "./abilities.js";
 import { CLASS_CATALOG, PULL_COST, TEN_PULL_COST, variantKey, findVariant, levelFromCopies, rollPull } from "./classes.js";
@@ -1681,6 +1681,7 @@ backfillGeneralLeaderboard();
 // vivono in memoria, ma vengono salvati nel Realtime Database:
 //   world/zones/<zoneKey> = { w: writes, c: claimed }     (zona senza nulla: cancellata)
 //   world/units/<chiave>  = true                          (es. "row|-6,3")
+//   world/version         = WORLD_VERSION                 (generazione con cui sono stati scritti)
 // Si caricano all'avvio, prima di accettare giocatori; ogni WORLD_SAVE_MS si salvano solo
 // le zone cambiate (qualunque sia la causa: scritture, attacchi dei boss, abilità), e tutto
 // viene salvato anche quando il server si spegne (deploy, riavvio, Render che lo addormenta).
@@ -1695,6 +1696,13 @@ function zoneRecord(z) {
 
 async function loadWorld() {
     try {
+        // numeri scritti su un mondo generato in modo diverso: non corrispondono più alle soluzioni
+        const version = (await db.ref("world/version").get()).val();
+        if (version !== WORLD_VERSION) {
+            await db.ref("world").set({ version: WORLD_VERSION });
+            console.log(`Mondo rigenerato (versione ${WORLD_VERSION}): numeri salvati azzerati`);
+            return;
+        }
         const [zones, units] = await Promise.all([db.ref("world/zones").get(), db.ref("world/units").get()]);
         for (const [key, rec] of Object.entries(zones.val() || {})) {
             const z = zoneState(key);

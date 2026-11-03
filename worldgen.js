@@ -4,6 +4,8 @@
 // Se cambi qualcosa qui, va cambiato in modo identico anche in game.js.
 
 export const WORLD_SEED = 20260222;
+// Da cambiare quando cambia la generazione: il server scarta i numeri salvati di un mondo diverso
+export const WORLD_VERSION = 2;
 
 export const mod = (n, m) => ((n % m) + m) % m;
 
@@ -21,11 +23,34 @@ export function isPlayableZone(zx, zy) {
     return false;
 }
 
-// Soluzione Sudoku infinita deterministica.
+// Soluzione Sudoku infinita deterministica, mescolata dal seed.
+// Base: la soluzione "a scorrimento" ((3r + r/3 + c) % 9) + 1, valida per ogni 9x9
+// allineato ai blocchi 3x3, ma con le righe sempre in ordine (1-9 ruotato).
+// Trasformazioni che restano valide per TUTTI i 9x9 del mondo infinito:
+//  - in ogni striscia verticale di 3 colonne (blocco x) le colonne si scambiano;
+//  - in ogni striscia orizzontale di 3 righe (blocco y) le righe si scambiano;
+//  - le cifre vengono rinominate con una permutazione globale.
+// (Righe, colonne e 3x3 contengono gli stessi numeri della base, solo in altro ordine.)
+const PERMS3 = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+const stripPerm = (i, salt) => PERMS3[Math.floor(hashCoord(i, 0, salt) * 6)];
 export function solutionAtCell(x, y) {
-    const r = mod(y, 9);
-    const c = mod(x, 9);
-    return ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
+    const zx = Math.floor(x / 3), zy = Math.floor(y / 3);
+    const c = mod(zx * 3 + stripPerm(zx, 31)[mod(x, 3)], 9);
+    const r = mod(zy * 3 + stripPerm(zy, 37)[mod(y, 3)], 9);
+    return digitMap()[(r * 3 + Math.floor(r / 3) + c) % 9];
+}
+
+// Permutazione delle cifre 1-9 dal seed (calcolata una volta)
+let digitPerm = null;
+function digitMap() {
+    if (digitPerm) return digitPerm;
+    const rng = mulberry32((WORLD_SEED ^ 0x5bd1e995) >>> 0);
+    const d = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    for (let i = 8; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [d[i], d[j]] = [d[j], d[i]];
+    }
+    return digitPerm = d;
 }
 
 function hashCoord(x, y, salt = 0) {

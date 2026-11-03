@@ -123,9 +123,15 @@ const cellHash = (x, y, s) => {
     h = Math.imul(h ^ (h >>> 13), 1274126177);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
+// Come nel gioco: soluzione base con righe e colonne mescolate dentro ogni striscia di 3
+// e cifre rinominate, così le righe non sono in ordine (solo decorativo)
+const BG_PERMS3 = [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]];
+const BG_DIGITS = [7, 3, 9, 1, 5, 8, 2, 6, 4];
 const solution = (x, y) => {
-    const r = ((y % 9) + 9) % 9, c = ((x % 9) + 9) % 9;
-    return ((r * 3 + Math.floor(r / 3) + c) % 9) + 1;
+    const bx = Math.floor(x / 3), by = Math.floor(y / 3);
+    const c = (((bx * 3 + BG_PERMS3[Math.floor(cellHash(bx, 0, 31) * 6)][((x % 3) + 3) % 3]) % 9) + 9) % 9;
+    const r = (((by * 3 + BG_PERMS3[Math.floor(cellHash(0, by, 37) * 6)][((y % 3) + 3) % 3]) % 9) + 9) % 9;
+    return BG_DIGITS[(r * 3 + Math.floor(r / 3) + c) % 9];
 };
 const isVoid = (x, y) => cellHash(Math.floor(x / 3), Math.floor(y / 3), 7) < 0.16;
 

@@ -26,7 +26,8 @@ window.CHANGELOG = [
                 "Portale (4b): un portale aperto in più a ogni livello della variante"
             ],
             fix: [
-                "I numeri scritti nel mondo sparivano quando il server si riavviava: ora sono salvati nel database"
+                "I numeri scritti nel mondo sparivano quando il server si riavviava: ora sono salvati nel database",
+                "Le soluzioni del mondo avevano le righe sempre in ordine (1-9 ruotato): ora righe, colonne e cifre sono mescolate dal seed (il mondo è stato rigenerato)"
             ]
         }
     },
